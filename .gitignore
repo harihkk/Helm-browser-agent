@@ -1,0 +1,53 @@
+# Secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Data
+*.db
+*.sqlite
+*.sqlite3
+agent_memory.db
+
+# Screenshots and generated artifacts
+screenshots/
+*.jpg
+*.jpeg
+*.png
+!frontend/**/*.png
+!frontend/**/*.jpg
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Playwright
+playwright-report/
+test-results/
+

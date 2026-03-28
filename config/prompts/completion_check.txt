@@ -1,0 +1,14 @@
+Has this web automation task been completed?
+
+TASK: {{ task_description }}
+
+ACTIONS TAKEN (last 10):
+{{ history }}
+
+CURRENT PAGE:
+- URL: {{ url }}
+- Title: {{ title }}
+- Content preview: {{ content }}
+
+Respond with JSON:
+{"completed": true/false, "confidence": 0.0-1.0, "reasoning": "explanation", "summary": "what was accomplished so far"}

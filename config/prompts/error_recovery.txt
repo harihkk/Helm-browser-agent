@@ -1,0 +1,15 @@
+A browser automation action FAILED. Suggest an alternative approach.
+
+TASK GOAL: {{ task_goal }}
+FAILED ACTION: {{ action }} with params {{ parameters }}
+ERROR: {{ error }}
+
+CURRENT PAGE:
+- URL: {{ url }}
+- Title: {{ title }}
+
+AVAILABLE ELEMENTS:
+{{ elements }}
+
+Suggest ONE alternative action. Respond with JSON:
+{"action": "navigate|click|type|scroll|wait|press_key", "parameters": {}, "reasoning": "why this alternative"}

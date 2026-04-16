@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic Browser</title>
+<style>
+:root{
+  --bg-0:#09090b;--bg-1:#111113;--bg-2:#18181b;--bg-3:#27272a;
+  --bg-hover:#2c2c30;--text-0:#fafafa;--text-1:#a1a1aa;--text-2:#52525b;
+  --border:#27272a;--border-subtle:#1e1e21;
+  --accent:#8b5cf6;--accent-dim:rgba(139,92,246,.12);
+  --green:#22c55e;--green-dim:rgba(34,197,94,.1);
+  --red:#ef4444;--red-dim:rgba(239,68,68,.1);
+  --orange:#f97316;--orange-dim:rgba(249,115,22,.1);
+  --radius:6px;--font:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',Roboto,sans-serif;
+  --mono:'SF Mono','Fira Code','JetBrains Mono',Consolas,monospace;
+}
+html[data-theme="light"]{
+  --bg-0:#fff;--bg-1:#fafafa;--bg-2:#f4f4f5;--bg-3:#e4e4e7;
+  --bg-hover:#ececee;--text-0:#09090b;--text-1:#71717a;--text-2:#a1a1aa;
+  --border:#e4e4e7;--border-subtle:#f0f0f2;
+  --accent:#7c3aed;--accent-dim:rgba(124,58,237,.07);
+  --green-dim:rgba(34,197,94,.07);--red-dim:rgba(239,68,68,.06);
+  --orange-dim:rgba(249,115,22,.07);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--font);background:var(--bg-0);color:var(--text-0);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+
+.shell{display:flex;flex-direction:column;height:100vh}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:0 20px;height:48px;border-bottom:1px solid var(--border);background:var(--bg-1);flex-shrink:0}
+.topbar-left{display:flex;align-items:center;gap:12px}
+.topbar-left h1{font-size:14px;font-weight:600;letter-spacing:-.01em}
+.topbar-left .sep{width:1px;height:16px;background:var(--border)}
+.topbar-left .tag{font-size:11px;color:var(--text-2);font-weight:500}
+.topbar-right{display:flex;align-items:center;gap:6px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.dot.off{background:var(--red)}
+
+.nav{display:flex;gap:2px;padding:0 16px;height:40px;align-items:center;border-bottom:1px solid var(--border);background:var(--bg-1);flex-shrink:0;overflow-x:auto}
+.nav button{background:none;border:none;color:var(--text-2);font-size:13px;padding:8px 12px;border-radius:var(--radius);cursor:pointer;font-family:var(--font);font-weight:500;white-space:nowrap;transition:color .15s,background .15s}
+.nav button:hover{color:var(--text-0);background:var(--bg-hover)}
+.nav button.active{color:var(--text-0);background:var(--bg-2)}
+
+.panels{flex:1;overflow:hidden;display:flex;flex-direction:column}
+.panel{display:none;flex:1;overflow:auto;padding:20px}
+.panel.active{display:flex;flex-direction:column}
+
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-2);color:var(--text-0);font-size:13px;font-weight:500;cursor:pointer;font-family:var(--font);transition:all .15s;white-space:nowrap}
+.btn:hover{background:var(--bg-hover);border-color:var(--bg-3)}
+.btn:disabled{opacity:.4;cursor:default;pointer-events:none}
+.btn-accent{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-accent:hover{opacity:.9;background:var(--accent)}
+.btn-ghost{background:transparent;border-color:transparent}
+.btn-ghost:hover{background:var(--bg-2)}
+.btn-sm{padding:4px 10px;font-size:12px}
+.btn-danger{border-color:var(--red);color:var(--red)}
+.btn-danger:hover{background:var(--red-dim)}
+
+.input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-1);color:var(--text-0);font-size:14px;font-family:var(--font);resize:vertical;transition:border-color .15s}
+.input:focus{outline:none;border-color:var(--accent)}
+.input::placeholder{color:var(--text-2)}
+label{font-size:12px;font-weight:500;color:var(--text-1);display:block;margin-bottom:4px}
+
+.section{margin-bottom:20px}
+.section-title{font-size:12px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px}
+.card{background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:16px}
+
+.auto-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;flex:1;min-height:0}
+@media(max-width:640px){.auto-grid{grid-template-columns:1fr}}
+.auto-left,.auto-right{display:flex;flex-direction:column;gap:12px;min-height:0}
+.auto-right{overflow:hidden}
+
+/* Log */
+.log-wrap{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
+.log-header{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:var(--bg-2);border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;cursor:pointer;user-select:none}
+.log-header span{font-size:12px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.04em}
+.log-header .toggle{font-size:11px;color:var(--text-2)}
+.log-box{overflow-y:auto;background:var(--bg-0);border:1px solid var(--border);border-radius:0 0 8px 8px;padding:10px;font-family:var(--mono);font-size:12px;min-height:80px;max-height:300px;transition:max-height .3s}
+.log-box.collapsed{max-height:0;min-height:0;padding:0 10px;overflow:hidden;border-top:none}
+.log-line{padding:4px 8px;margin-bottom:2px;border-radius:4px;color:var(--text-1);border-left:2px solid transparent}
+.log-line.ok{border-left-color:var(--green);color:var(--text-0)}
+.log-line.err{border-left-color:var(--red);color:var(--red)}
+.log-line.think{border-left-color:var(--accent);color:var(--accent);cursor:pointer}
+.log-line .ts{color:var(--text-2);margin-right:6px;font-size:11px}
+
+/* Preview */
+.preview-wrap{background:#000;border-radius:8px;overflow:hidden;aspect-ratio:16/9;position:relative;border:1px solid var(--border)}
+.preview-wrap img{width:100%;height:100%;object-fit:contain;transition:opacity .15s ease}
+.preview-badge{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.7);color:#fff;padding:2px 8px;border-radius:4px;font-size:11px}
+
+.filmstrip{display:flex;gap:4px;overflow-x:auto;padding:4px 0}
+.filmstrip img{height:48px;border-radius:4px;border:1px solid var(--border);cursor:pointer;transition:border-color .15s}
+.filmstrip img:hover{border-color:var(--accent)}
+
+.progress-bar{height:3px;background:var(--bg-3);border-radius:2px;overflow:hidden;margin-top:8px}
+.progress-bar .fill{height:100%;background:var(--accent);width:0%;transition:width .3s}
+
+.quick-grid{display:flex;flex-wrap:wrap;gap:6px}
+.quick-btn{padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-1);color:var(--text-1);font-size:12px;cursor:pointer;transition:all .15s}
+.quick-btn:hover{color:var(--text-0);border-color:var(--bg-3);background:var(--bg-2)}
+
+.cost-pill{font-size:12px;color:var(--text-2);font-family:var(--mono)}
+
+.tmpl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.tmpl-card{background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:14px;transition:border-color .15s}
+.tmpl-card:hover{border-color:var(--bg-3)}
+.tmpl-name{font-weight:600;font-size:14px;margin-bottom:4px}
+.tmpl-desc{font-size:12px;color:var(--text-1);margin-bottom:10px}
+.tmpl-tag{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-2);background:var(--bg-2);padding:2px 6px;border-radius:3px;font-weight:600}
+
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:8px 10px;font-size:11px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border)}
+td{padding:8px 10px;border-bottom:1px solid var(--border-subtle);font-size:13px}
+.badge{display:inline-block;padding:1px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.badge-ok{background:var(--green-dim);color:var(--green)}
+.badge-err{background:var(--red-dim);color:var(--red)}
+
+.stat-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px}
+.stat{background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:16px;text-align:center}
+.stat-val{font-size:1.75rem;font-weight:700;letter-spacing:-.02em}
+.stat-lbl{font-size:11px;color:var(--text-2);margin-top:2px;text-transform:uppercase;letter-spacing:.04em}
+
+.list-item{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:6px;background:var(--bg-1)}
+.list-item-info{flex:1}
+.list-item-name{font-weight:500;font-size:13px}
+.list-item-sub{font-size:11px;color:var(--text-2)}
+.list-item-actions{display:flex;gap:6px}
+
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9000;align-items:center;justify-content:center}
+.modal-bg.on{display:flex}
+.modal{background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:24px;width:90%;max-width:440px}
+.modal h2{font-size:16px;font-weight:600;margin-bottom:16px}
+.modal .input{margin-bottom:10px}
+.modal .btn-row{display:flex;gap:8px;margin-top:14px}
+
+#toast-box{position:fixed;top:12px;right:12px;z-index:10000;display:flex;flex-direction:column;gap:6px}
+.toast{padding:10px 16px;border-radius:6px;font-size:13px;font-weight:500;color:#fff;animation:fadeIn .2s;max-width:320px}
+.toast-ok{background:#16a34a}.toast-err{background:#dc2626}.toast-warn{background:#d97706}.toast-info{background:var(--accent)}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+
+.voice-btn.on{background:var(--red);border-color:var(--red);color:#fff;animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--bg-3);border-radius:3px}
+
+.empty{color:var(--text-2);font-size:13px;padding:20px 0;text-align:center}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.mt{margin-top:10px}.mb{margin-bottom:10px}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>Agentic Browser</h1>
+      <div class="sep"></div>
+      <span class="tag" id="aiTag" title="AI provider cascade">…</span>
+      <span class="cost-pill" id="costPill" title="Tokens used this session (free tier)">0 tok</span>
+    </div>
+    <div class="topbar-right">
+      <button class="btn btn-ghost btn-sm" onclick="toggleTheme()" id="themeBtn">Light</button>
+      <button class="btn btn-ghost btn-sm" onclick="takeScreenshot()">Capture</button>
+      <div class="dot" id="connDot"></div>
+    </div>
+  </div>
+
+  <div class="nav" id="nav">
+    <button class="active" data-t="auto">Automation</button>
+    <button data-t="templates">Templates</button>
+    <button data-t="history">History</button>
+    <button data-t="recordings">Recordings</button>
+    <button data-t="workflows">Workflows</button>
+    <button data-t="scheduled">Scheduled</button>
+    <button data-t="analytics">Analytics</button>
+  </div>
+
+  <div class="panels">
+    <!-- AUTOMATION -->
+    <div class="panel active" id="p-auto">
+      <div class="auto-grid">
+        <div class="auto-left">
+          <div class="card">
+            <textarea id="taskInput" class="input" rows="4" placeholder="Describe what you want to automate..."></textarea>
+            <div class="row mt">
+              <button class="btn btn-accent" id="runBtn" onclick="runTask()">Run</button>
+              <button class="btn btn-danger btn-sm" id="stopBtn" onclick="stopTask()" disabled>Stop</button>
+              <button class="btn btn-ghost btn-sm" onclick="clearAll()">Clear</button>
+              <button class="btn btn-ghost btn-sm voice-btn" id="voiceBtn" onclick="toggleVoice()">Mic</button>
+              <button class="btn btn-ghost btn-sm" onclick="extractData()">Extract Data</button>
+            </div>
+            <div class="progress-bar mt"><div class="fill" id="progFill"></div></div>
+            <div class="row mt" style="justify-content:space-between">
+              <span style="font-size:12px;color:var(--text-2)" id="statusLabel">Ready</span>
+            </div>
+          </div>
+          <div>
+            <div class="section-title">Quick tasks</div>
+            <div class="quick-grid">
+              <button class="quick-btn" onclick="setTask('Go to Google and search for artificial intelligence news')">Google Search</button>
+              <button class="quick-btn" onclick="setTask('Navigate to Wikipedia and search for machine learning')">Wikipedia</button>
+              <button class="quick-btn" onclick="setTask('Go to news.ycombinator.com and extract the top 10 stories')">Hacker News</button>
+              <button class="quick-btn" onclick="setTask('Go to github.com/trending and list the top trending repos')">GitHub Trending</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="auto-right">
+          <div class="row mb" style="gap:6px;font-size:12px;align-items:center">
+            <span style="color:var(--text-2);font-weight:600" id="browserLabel">Built-in</span>
+            <select id="browserSelect" class="input" style="width:auto;padding:2px 8px;font-size:12px;height:28px;flex:0 0 auto">
+              <option value="">Built-in Chromium</option>
+            </select>
+            <button class="btn btn-sm" onclick="switchBrowser()" id="switchBtn">Switch</button>
+          </div>
+          <div class="preview-wrap">
+            <img id="prevImg" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="">
+            <span class="preview-badge" id="prevBadge">No preview</span>
+          </div>
+          <div class="filmstrip" id="filmstrip"></div>
+          <div class="log-wrap">
+            <div class="log-header" onclick="toggleLogs()">
+              <span>Logs</span>
+              <span class="toggle" id="logToggle">Hide</span>
+            </div>
+            <div class="log-box" id="logBox">
+              <div class="log-line ok"><span class="ts">--:--:--</span>System ready</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TEMPLATES -->
+    <div class="panel" id="p-templates">
+      <div class="section-title mb">Task Templates</div>
+      <div class="tmpl-grid" id="tmplGrid"></div>
+    </div>
+
+    <!-- HISTORY -->
+    <div class="panel" id="p-history">
+      <div class="section-title mb">Task History</div>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table><thead><tr><th>Time</th><th>Task</th><th>Status</th><th>Steps</th><th>Cost</th><th>Duration</th></tr></thead>
+        <tbody id="histBody"></tbody></table>
+      </div>
+    </div>
+
+    <!-- RECORDINGS -->
+    <div class="panel" id="p-recordings">
+      <div class="section-title mb">Session Recordings</div>
+      <div id="recList"></div>
+    </div>
+
+    <!-- WORKFLOWS -->
+    <div class="panel" id="p-workflows">
+      <div class="row mb" style="justify-content:space-between">
+        <div class="section-title">Workflows</div>
+        <button class="btn btn-sm" onclick="openModal('wfModal')">New workflow</button>
+      </div>
+      <div id="wfList"></div>
+    </div>
+
+    <!-- SCHEDULED -->
+    <div class="panel" id="p-scheduled">
+      <div class="row mb" style="justify-content:space-between">
+        <div class="section-title">Scheduled Tasks</div>
+        <button class="btn btn-sm" onclick="openModal('schedModal')">Schedule task</button>
+      </div>
+      <div id="schedList"></div>
+    </div>
+
+    <!-- ANALYTICS -->
+    <div class="panel" id="p-analytics">
+      <div class="section-title mb">Analytics</div>
+      <div class="stat-row mb" id="statRow"></div>
+      <div id="chartArea"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modals -->
+<div class="modal-bg" id="schedModal"><div class="modal">
+  <h2>Schedule a task</h2>
+  <label>Name</label><input class="input" id="sName" placeholder="Price monitor">
+  <label>Task description</label><input class="input" id="sDesc" placeholder="Check laptop prices on Amazon">
+  <label>Interval (e.g. 5m, 1h, 1d)</label><input class="input" id="sInt" placeholder="1h">
+  <div class="btn-row"><button class="btn btn-accent" onclick="createSched()">Create</button><button class="btn" onclick="closeModal('schedModal')">Cancel</button></div>
+</div></div>
+
+<div class="modal-bg" id="wfModal"><div class="modal">
+  <h2>New workflow</h2>
+  <label>Name</label><input class="input" id="wfName" placeholder="My workflow">
+  <label>Description</label><input class="input" id="wfDescI" placeholder="What does it do?">
+  <label>Steps (one task per line)</label>
+  <textarea class="input" id="wfSteps" rows="4" placeholder="Go to Google and search for AI news&#10;Extract the top 5 results"></textarea>
+  <div class="btn-row"><button class="btn btn-accent" onclick="createWf()">Create</button><button class="btn" onclick="closeModal('wfModal')">Cancel</button></div>
+</div></div>
+
+<div class="modal-bg" id="tmplModal"><div class="modal">
+  <h2 id="tmplModalTitle">Run template</h2>
+  <div id="tmplVars"></div>
+  <div class="btn-row"><button class="btn btn-accent" onclick="execTmpl()">Run</button><button class="btn" onclick="closeModal('tmplModal')">Cancel</button></div>
+</div></div>
+
+<div id="toast-box"></div>
+
+<script>
+/* === State === */
+let ws=null,running=false,cost=0,selTmpl=null,recognition=null,voiceOn=false,logsVisible=true;
+
+/* === Toast === */
+function toast(m,t='info'){const c=document.getElementById('toast-box'),d=document.createElement('div');d.className='toast toast-'+t;d.textContent=m;c.appendChild(d);setTimeout(()=>{d.style.opacity='0';setTimeout(()=>d.remove(),200)},3500)}
+
+/* === Theme === */
+function toggleTheme(){const h=document.documentElement,d=h.dataset.theme==='dark';h.dataset.theme=d?'light':'dark';localStorage.setItem('t',d?'light':'dark');document.getElementById('themeBtn').textContent=d?'Dark':'Light'}
+(function(){const s=localStorage.getItem('t')||'dark';document.documentElement.dataset.theme=s;const b=document.getElementById('themeBtn');if(b)b.textContent=s==='dark'?'Light':'Dark'})();
+
+/* === Tabs === */
+document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');document.getElementById('p-'+b.dataset.t).classList.add('active');
+  const t=b.dataset.t;
+  if(t==='templates')loadTmpls();else if(t==='history')loadHist();else if(t==='recordings')loadRecs();
+  else if(t==='workflows')loadWfs();else if(t==='scheduled')loadScheds();else if(t==='analytics')loadStats();
+}));
+
+/* === Logs toggle === */
+function toggleLogs(){
+  const box=document.getElementById('logBox'),tog=document.getElementById('logToggle');
+  logsVisible=!logsVisible;
+  box.classList.toggle('collapsed',!logsVisible);
+  tog.textContent=logsVisible?'Hide':'Show';
+}
+
+/* === Clear === */
+function clearAll(){
+  document.getElementById('logBox').innerHTML='<div class="log-line ok"><span class="ts">--:--:--</span>System ready</div>';
+  document.getElementById('filmstrip').innerHTML='';
+  document.getElementById('prevImg').src='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  document.getElementById('prevBadge').textContent='No preview';
+  document.getElementById('progFill').style.width='0%';
+  document.getElementById('taskInput').value='';
+  cost=0;document.getElementById('costPill').textContent='0 tok';
+  setStatus('Ready',false);
+  resetUI();
+}
+
+/* === WebSocket === */
+function connectWS(){
+  const p=location.protocol==='https:'?'wss:':'ws:';
+  ws=new WebSocket(p+'//'+location.host+'/ws/advanced');
+  ws.onopen=()=>{document.getElementById('connDot').className='dot'};
+  ws.onclose=()=>{document.getElementById('connDot').className='dot off';setTimeout(connectWS,3000)};
+  ws.onerror=()=>{};
+  ws.onmessage=e=>{try{handle(JSON.parse(e.data))}catch(err){console.error('WS parse error',err)}};
+}
+function handle(d){
+  switch(d.type){
+    case 'task_queued':log('Queued - waiting for browser','');setStatus('Queued...',true);break;
+    case 'task_started':log('Task started','ok');setStatus('Running...',true);break;
+    case 'planning_complete':
+      log('Planned '+d.plans_created+' action(s), '+Math.round((d.confidence||0)*100)+'% confidence','ok');
+      if(d.thinking)logThink(d.thinking);
+      if(d.groq_stats&&typeof d.groq_stats.total_tokens==='number')updTokens(d.groq_stats.total_tokens);break;
+    case 'step_started':
+      document.getElementById('progFill').style.width=((d.step/d.max_steps)*100)+'%';
+      setStatus('Step '+d.step+'/'+d.max_steps,true);break;
+    case 'step_executed':
+      log(d.action+': '+(d.success?'ok':'FAILED')+(d.error?' - '+d.error:''),d.success?'ok':'err');
+      if(d.thinking)logThink(d.thinking);
+      if(d.screenshot){document.getElementById('prevImg').src='data:image/jpeg;base64,'+d.screenshot;document.getElementById('prevBadge').textContent='Step '+(d.step||'');addFrame(d.screenshot,d.step)}
+      if(d.diff&&d.diff.changed)log('Page: '+d.diff.diff_summary,'');break;
+    case 'completion_check':if(d.completed)log('Task complete: '+d.summary,'ok');break;
+    case 'recovery_success':log('Recovered: '+d.reasoning,'ok');break;
+    case 'warning':log(d.message,'err');toast(d.message,'warn');break;
+    case 'task_completed':
+      log('Done - '+d.steps_taken+' steps, '+Math.round(d.execution_time)+'s','ok');
+      if(d.result_summary)log(d.result_summary,'ok');
+      if(d.groq_stats&&typeof d.groq_stats.total_tokens==='number')updTokens(d.groq_stats.total_tokens);
+      resetUI();toast('Task completed','ok');break;
+    case 'task_failed':log('Failed: '+d.error,'err');resetUI();toast(d.error||'Task failed','err');break;
+    case 'task_cancelled':log('Cancelled','');resetUI();break;
+  }
+}
+
+/* === Logging === */
+function log(m,cls){const b=document.getElementById('logBox'),d=document.createElement('div');d.className='log-line '+(cls||'');d.innerHTML='<span class="ts">'+new Date().toLocaleTimeString()+'</span>'+esc(m);b.appendChild(d);b.scrollTop=b.scrollHeight}
+function logThink(t){const b=document.getElementById('logBox'),d=document.createElement('details');d.className='log-line think';d.innerHTML='<summary>AI reasoning</summary><pre style="white-space:pre-wrap;margin-top:4px;font-size:12px;color:var(--text-1)">'+esc(t)+'</pre>';b.appendChild(d);b.scrollTop=b.scrollHeight}
+function addFrame(b64,step){const s=document.getElementById('filmstrip'),i=document.createElement('img');i.src='data:image/jpeg;base64,'+b64;i.title='Step '+step;i.onclick=()=>{document.getElementById('prevImg').src=i.src};s.appendChild(i);while(s.childElementCount>30)s.removeChild(s.firstChild);s.scrollLeft=s.scrollWidth}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+/* === UI state === */
+function setStatus(t){document.getElementById('statusLabel').textContent=t}
+function updCost(c){cost=c;document.getElementById('costPill').textContent='$'+c.toFixed(4)}
+function updTokens(t){document.getElementById('costPill').textContent=(t>=1000?(t/1000).toFixed(1)+'k':t)+' tok'}
+function setTask(t){document.getElementById('taskInput').value=t}
+function resetUI(){running=false;document.getElementById('runBtn').disabled=false;document.getElementById('stopBtn').disabled=true;document.getElementById('progFill').style.width='0%';setStatus('Ready')}
+
+/* === Execute === */
+function runTask(){
+  const t=document.getElementById('taskInput').value.trim();
+  if(!t){toast('Enter a task','err');return}
+  if(!ws||ws.readyState!==1){toast('Connecting...','warn');connectWS();return}
+  document.getElementById('logBox').innerHTML='';document.getElementById('filmstrip').innerHTML='';
+  running=true;document.getElementById('runBtn').disabled=true;document.getElementById('stopBtn').disabled=false;
+  ws.send(JSON.stringify({type:'execute_advanced_task',description:t,options:{max_steps:25,confidence_threshold:0.6}}));
+}
+function stopTask(){
+  if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'stop_task'}));
+  resetUI();
+  log('Stop requested','');
+}
+
+/* === Screenshot === */
+async function takeScreenshot(){try{const r=await fetch('/api/screenshot');const d=await r.json();if(d.screenshot){document.getElementById('prevImg').src='data:image/jpeg;base64,'+d.screenshot;toast('Captured','ok')}}catch(e){toast('Failed','err')}}
+
+/* === Extract === */
+async function extractData(){try{const r=await fetch('/api/extract?format=json');const d=await r.json();log('Extracted '+(d.tables||[]).length+' tables, '+(d.links||[]).length+' links','ok');toast('Data extracted - check console','ok');console.log(d);const cr=await fetch('/api/extract?format=csv');const csv=await cr.text();const b=new Blob([csv],{type:'text/csv'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download='data.csv';a.click()}catch(e){toast('Extraction failed','err')}}
+
+/* === Voice === */
+function toggleVoice(){
+  if(!('webkitSpeechRecognition' in window||'SpeechRecognition' in window)){toast('Speech not supported in this browser','err');return}
+  const b=document.getElementById('voiceBtn');
+  if(voiceOn){recognition.stop();b.classList.remove('on');b.textContent='Mic';voiceOn=false;return}
+  const S=window.SpeechRecognition||window.webkitSpeechRecognition;recognition=new S();recognition.continuous=false;recognition.lang='en-US';
+  recognition.onresult=e=>{document.getElementById('taskInput').value=e.results[0][0].transcript;toast('Voice captured','ok')};
+  recognition.onend=()=>{b.classList.remove('on');b.textContent='Mic';voiceOn=false};
+  recognition.start();b.classList.add('on');b.textContent='Listening...';voiceOn=true;
+}
+
+/* === Templates === */
+async function loadTmpls(){try{const r=await fetch('/api/templates');const ts=await r.json();const g=document.getElementById('tmplGrid');g.innerHTML=ts.map(t=>`<div class="tmpl-card"><div class="tmpl-name">${esc(t.name)}</div><div class="tmpl-desc">${esc(t.description)}</div><div class="row" style="justify-content:space-between"><span class="tmpl-tag">${esc(t.category)}</span><button class="btn btn-sm" onclick="showTmpl(${t.id},'${esc(t.name)}','${t.variables||"[]"}')">Run</button></div></div>`).join('')}catch(e){}}
+function showTmpl(id,name,vars){selTmpl=id;document.getElementById('tmplModalTitle').textContent=name;const v=JSON.parse(vars),c=document.getElementById('tmplVars');c.innerHTML=v.map(x=>`<label>${esc(x)}</label><input class="input" id="tv_${x}" placeholder="${esc(x)}">`).join('');openModal('tmplModal')}
+async function execTmpl(){const inputs=document.querySelectorAll('#tmplVars input'),vars={};inputs.forEach(i=>{vars[i.id.replace('tv_','')]=i.value});closeModal('tmplModal');toast('Running template...','info');try{await fetch('/api/templates/'+selTmpl+'/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({variables:vars})});toast('Template done','ok')}catch(e){toast('Failed','err')}}
+
+/* === History === */
+async function loadHist(){try{const r=await fetch('/api/tasks/history');const ts=await r.json();document.getElementById('histBody').innerHTML=ts.map(t=>`<tr><td>${t.created_at?new Date(t.created_at).toLocaleString():'-'}</td><td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.description||'-')}</td><td><span class="badge ${t.status==='completed'?'badge-ok':'badge-err'}">${t.status||'-'}</span></td><td>${t.steps_taken||0}</td><td>$${(t.total_cost||0).toFixed(4)}</td><td>${t.execution_time?Math.round(t.execution_time)+'s':'-'}</td></tr>`).join('')}catch(e){}}
+
+/* === Recordings === */
+async function loadRecs(){try{const r=await fetch('/api/recordings');const rs=await r.json();const c=document.getElementById('recList');if(!rs.length){c.innerHTML='<div class="empty">No recordings yet. Run a task to create one.</div>';return}c.innerHTML=rs.map(r=>`<div class="list-item"><div class="list-item-info"><div class="list-item-name">${esc(r.name||'Recording')}</div><div class="list-item-sub">${r.created_at||''}</div></div><div class="list-item-actions"><a href="/api/recordings/${r.id}/export?format=python" class="btn btn-sm" download>Python</a><a href="/api/recordings/${r.id}/export?format=json" class="btn btn-sm" download>JSON</a></div></div>`).join('')}catch(e){}}
+
+/* === Workflows === */
+async function loadWfs(){try{const r=await fetch('/api/workflows');const ws=await r.json();const c=document.getElementById('wfList');if(!ws.length){c.innerHTML='<div class="empty">No workflows yet.</div>';return}c.innerHTML=ws.map(w=>`<div class="list-item"><div class="list-item-info"><div class="list-item-name">${esc(w.name)}</div><div class="list-item-sub">${esc(w.description||'')}</div></div><button class="btn btn-sm" onclick="runWf('${w.id}')">Run</button></div>`).join('')}catch(e){}}
+async function createWf(){const n=document.getElementById('wfName').value.trim(),d=document.getElementById('wfDescI').value.trim(),s=document.getElementById('wfSteps').value.trim();if(!n||!s){toast('Fill fields','err');return}const steps=s.split('\n').filter(x=>x.trim()).map((x,i)=>({order:i+1,name:'Step '+(i+1),task_description:x.trim(),on_failure:'stop'}));try{await fetch('/api/workflows',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,description:d,steps})});closeModal('wfModal');toast('Workflow created','ok');loadWfs()}catch(e){toast('Failed','err')}}
+async function runWf(id){toast('Running workflow...','info');try{await fetch('/api/workflows/'+id+'/execute',{method:'POST'});toast('Workflow done','ok')}catch(e){toast('Failed','err')}}
+
+/* === Scheduled === */
+async function loadScheds(){try{const r=await fetch('/api/scheduled');const ts=await r.json();const c=document.getElementById('schedList');if(!ts.length){c.innerHTML='<div class="empty">No scheduled tasks.</div>';return}c.innerHTML=ts.map(t=>`<div class="list-item"><div class="list-item-info"><div class="list-item-name">${esc(t.name)}</div><div class="list-item-sub">${esc(t.description)} · Every ${t.cron_expression} · Runs: ${t.run_count||0}</div></div><div class="list-item-actions"><button class="btn btn-sm" onclick="toggleSched('${t.id}',${!t.enabled})">${t.enabled?'Pause':'Resume'}</button><button class="btn btn-sm btn-danger" onclick="delSched('${t.id}')">Delete</button></div></div>`).join('')}catch(e){}}
+async function createSched(){const n=document.getElementById('sName').value.trim(),d=document.getElementById('sDesc').value.trim(),i=document.getElementById('sInt').value.trim();if(!n||!d||!i){toast('Fill all fields','err');return}try{const r=await fetch('/api/scheduled',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,description:d,interval:i})});const data=await r.json();if(data.error){toast(data.error,'err');return}closeModal('schedModal');toast('Task scheduled','ok');loadScheds()}catch(e){toast('Failed','err')}}
+async function toggleSched(id,en){await fetch('/api/scheduled/'+id+'/toggle?enabled='+en,{method:'POST'});loadScheds()}
+async function delSched(id){await fetch('/api/scheduled/'+id,{method:'DELETE'});loadScheds()}
+
+/* === Analytics === */
+async function loadStats(){try{const r=await fetch('/api/analytics');const d=await r.json();document.getElementById('statRow').innerHTML=`<div class="stat"><div class="stat-val">${d.total_tasks}</div><div class="stat-lbl">Tasks</div></div><div class="stat"><div class="stat-val">${d.success_rate}%</div><div class="stat-lbl">Success</div></div><div class="stat"><div class="stat-val">${d.avg_steps}</div><div class="stat-lbl">Avg Steps</div></div><div class="stat"><div class="stat-val">${d.avg_execution_time}s</div><div class="stat-lbl">Avg Time</div></div><div class="stat"><div class="stat-val">$${d.total_cost}</div><div class="stat-lbl">Total Cost</div></div>`}catch(e){}}
+
+/* === Modals === */
+function openModal(id){document.getElementById(id).classList.add('on')}
+function closeModal(id){document.getElementById(id).classList.remove('on')}
+document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('on')}));
+
+/* === Keys === */
+document.addEventListener('keydown',e=>{
+  if(e.ctrlKey&&e.key==='Enter'){e.preventDefault();runTask()}
+  else if(e.key==='Escape'){if(running)stopTask()}
+  else if(e.ctrlKey&&e.key==='d'){e.preventDefault();toggleTheme()}
+  else if(e.ctrlKey&&e.key==='l'){e.preventDefault();toggleLogs()}
+});
+
+/* === Browser Selection === */
+async function loadBrowsers(){
+  try{
+    const r=await fetch('/api/browser/status');const d=await r.json();
+    const sel=document.getElementById('browserSelect');
+    const lbl=document.getElementById('browserLabel');
+    lbl.textContent=d.current==='built-in'?'Built-in':d.current.charAt(0).toUpperCase()+d.current.slice(1);
+    sel.innerHTML='<option value="">Built-in Chromium</option>';
+    (d.available||[]).forEach(b=>{
+      const name=b.name.charAt(0).toUpperCase()+b.name.slice(1);
+      const selected=b.name===d.current?' selected':'';
+      sel.innerHTML+=`<option value="${b.name}"${selected}>${name}</option>`;
+    });
+    // When using a real browser, the preview pane goes blank - that's
+    // intentional (screenshots would steal focus). Tell the user.
+    const badge=document.getElementById('prevBadge');
+    if(d.current!=='built-in'){
+      badge.textContent='Watch your '+d.current+' window';
+    }else{
+      badge.textContent='No preview';
+    }
+  }catch(e){}
+}
+async function switchBrowser(){
+  const sel=document.getElementById('browserSelect');
+  const browser=sel.value;
+  const btn=document.getElementById('switchBtn');
+  btn.disabled=true;btn.textContent='Switching...';
+  try{
+    let result;
+    if(browser){
+      log('Launching '+browser+' with your profile... (close it first if open)','');
+      toast('Close '+browser+' first (Cmd+Q), then it will relaunch with your profile','info');
+      result=await(await fetch('/api/browser/launch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({browser}),signal:AbortSignal.timeout(25000)})).json();
+    }else{
+      log('Switching to built-in Chromium...','');
+      result=await(await fetch('/api/browser/builtin',{method:'POST'})).json();
+    }
+    if(result.success!==false){
+      toast(result.message||'Browser switched','ok');
+      log(result.message||'Switched','ok');
+    }else{
+      toast(result.error||'Failed - make sure the browser is fully closed (Cmd+Q) first','err');
+      log(result.error||'Switch failed','err');
+    }
+    loadBrowsers();
+  }catch(e){toast('Switch failed: '+e.message,'err')}
+  finally{btn.disabled=false;btn.textContent='Switch'}
+}
+
+async function loadProviders(){
+  try{
+    const r=await fetch('/api/status');const d=await r.json();
+    const names=(d.providers||[]).map(p=>p.name+(p.local?'(local)':'')).join(' -> ');
+    document.getElementById('aiTag').textContent=names||'no AI';
+    document.getElementById('aiTag').title='AI cascade: '+(d.providers||[]).map(p=>p.name+':'+p.model).join(' -> ');
+  }catch(e){}
+}
+
+/* === Init === */
+connectWS();loadBrowsers();loadProviders();
+</script>
+</body>
+</html>

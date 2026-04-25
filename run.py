@@ -1,6 +1,6 @@
 """
-Advanced Agentic Browser - Groq Powered Runner
-=============================================
+Surf - AI-driven browser automation
+===================================
 """
 
 import os
@@ -75,7 +75,7 @@ def check_playwright_browsers():
 def display_startup_info():
     print()
     print("=" * 60)
-    print("  ADVANCED AGENTIC BROWSER v3.0 - GROQ POWERED")
+    print("  SURF v0.2 - browse the web with AI")
     print("=" * 60)
     print()
     print("  Features:")
@@ -100,7 +100,7 @@ def display_startup_info():
 
 
 def main():
-    print("Advanced Agentic Browser starting...")
+    print("Surf starting...")
     print()
 
     if not check_requirements():

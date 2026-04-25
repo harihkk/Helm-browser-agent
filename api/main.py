@@ -1,5 +1,5 @@
 """
-Agentic Browser API - FastAPI + WebSocket streaming
+Surf API - FastAPI + WebSocket streaming
 """
 
 import asyncio
@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI):
     global browser_engine, ai_agent, orchestrator, db
     global session_recorder, data_extractor, template_engine, workflow_engine, scheduler
 
-    logger.info("Starting Agentic Browser...")
+    logger.info("Starting Surf...")
 
     # Database
     try:
@@ -143,7 +143,7 @@ async def lifespan(app: FastAPI):
             scheduler.set_database(db)
             await scheduler.load_from_db()
 
-    logger.info("Agentic Browser started! http://localhost:8000")
+    logger.info("Surf started! http://localhost:8000")
     if not ai_agent:
         logger.warning("AI agent not available - set GROQ_API_KEY to enable")
 
@@ -167,7 +167,7 @@ async def lifespan(app: FastAPI):
 # ------------------------------------------------------------------ #
 # App
 # ------------------------------------------------------------------ #
-app = FastAPI(title="Agentic Browser", version="3.0.0", lifespan=lifespan)
+app = FastAPI(title="Surf", version="3.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

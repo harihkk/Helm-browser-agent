@@ -3,26 +3,28 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Agentic Browser</title>
+<title>Surf</title>
 <style>
 :root{
-  --bg-0:#09090b;--bg-1:#111113;--bg-2:#18181b;--bg-3:#27272a;
-  --bg-hover:#2c2c30;--text-0:#fafafa;--text-1:#a1a1aa;--text-2:#52525b;
-  --border:#27272a;--border-subtle:#1e1e21;
-  --accent:#8b5cf6;--accent-dim:rgba(139,92,246,.12);
-  --green:#22c55e;--green-dim:rgba(34,197,94,.1);
-  --red:#ef4444;--red-dim:rgba(239,68,68,.1);
-  --orange:#f97316;--orange-dim:rgba(249,115,22,.1);
+  /* Deep ocean dark theme */
+  --bg-0:#020617;--bg-1:#0a1428;--bg-2:#0f1d36;--bg-3:#1a2d4a;
+  --bg-hover:#1f3457;--text-0:#e0f2fe;--text-1:#7dd3fc;--text-2:#475569;
+  --border:#1e3a5f;--border-subtle:#142440;
+  --accent:#06b6d4;--accent-dim:rgba(6,182,212,.15);
+  --green:#10b981;--green-dim:rgba(16,185,129,.12);
+  --red:#f43f5e;--red-dim:rgba(244,63,94,.12);
+  --orange:#f59e0b;--orange-dim:rgba(245,158,11,.12);
   --radius:6px;--font:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',Roboto,sans-serif;
   --mono:'SF Mono','Fira Code','JetBrains Mono',Consolas,monospace;
 }
 html[data-theme="light"]{
-  --bg-0:#fff;--bg-1:#fafafa;--bg-2:#f4f4f5;--bg-3:#e4e4e7;
-  --bg-hover:#ececee;--text-0:#09090b;--text-1:#71717a;--text-2:#a1a1aa;
-  --border:#e4e4e7;--border-subtle:#f0f0f2;
-  --accent:#7c3aed;--accent-dim:rgba(124,58,237,.07);
-  --green-dim:rgba(34,197,94,.07);--red-dim:rgba(239,68,68,.06);
-  --orange-dim:rgba(249,115,22,.07);
+  /* Light surf foam */
+  --bg-0:#f0f9ff;--bg-1:#e0f2fe;--bg-2:#bae6fd;--bg-3:#7dd3fc;
+  --bg-hover:#bae6fd;--text-0:#0c4a6e;--text-1:#0369a1;--text-2:#64748b;
+  --border:#bae6fd;--border-subtle:#e0f2fe;
+  --accent:#0891b2;--accent-dim:rgba(8,145,178,.1);
+  --green-dim:rgba(16,185,129,.08);--red-dim:rgba(244,63,94,.08);
+  --orange-dim:rgba(245,158,11,.08);
 }
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:var(--font);background:var(--bg-0);color:var(--text-0);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
@@ -155,9 +157,9 @@ td{padding:8px 10px;border-bottom:1px solid var(--border-subtle);font-size:13px}
 <div class="shell">
   <div class="topbar">
     <div class="topbar-left">
-      <h1>Agentic Browser</h1>
+      <h1>🌊 Surf</h1>
       <div class="sep"></div>
-      <span class="tag" id="aiTag" title="AI provider cascade">…</span>
+      <span class="tag" id="aiTag" title="AI provider cascade">...</span>
       <span class="cost-pill" id="costPill" title="Tokens used this session (free tier)">0 tok</span>
     </div>
     <div class="topbar-right">

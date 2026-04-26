@@ -1,4 +1,4 @@
-# Secrets — NEVER commit
+# Secrets - never commit
 .env
 .env.local
 .env.*.local
@@ -51,3 +51,4 @@ Thumbs.db
 playwright-report/
 test-results/
 
+# Local tooling

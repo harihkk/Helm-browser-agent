@@ -11,6 +11,7 @@ import logging
 import time
 import uuid
 from typing import Any, AsyncGenerator, Dict
+from urllib.parse import quote_plus
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,15 @@ class TemplateEngine:
 
         # Share the orchestrator's lock so we never drive the browser
         # concurrently with an AI task or another template.
-        lock = getattr(self.orchestrator, '_run_lock', None)
+        if any(step.get('action') == 'task' for step in resolved):
+            async for update in self._execute_agent_template(task_id, name, resolved):
+                yield update
+            return
+
+        # Share the orchestrator's lock so we never drive the browser
+        # concurrently with an AI task or another template.
+        ensure = getattr(self.orchestrator, '_ensure_run_lock', None)
+        lock = ensure() if callable(ensure) else getattr(self.orchestrator, '_run_lock', None)
         if lock and lock.locked():
             yield {'type': 'task_queued', 'task_id': task_id,
                    'description': f"Template: {name}"}
@@ -115,10 +124,40 @@ class TemplateEngine:
                 except RuntimeError:
                     pass
 
+    async def _execute_agent_template(self, task_id: str, name: str,
+                                      steps: list) -> AsyncGenerator:
+        agent_steps = [
+            step for step in steps
+            if step.get('action') == 'task' and step.get('parameters', {}).get('description')
+        ]
+        if not agent_steps:
+            yield {
+                'type': 'task_failed', 'task_id': task_id,
+                'error': 'Template has no runnable task step.',
+                'steps_taken': 0, 'execution_time': 0,
+            }
+            return
+
+        for i, step in enumerate(agent_steps, start=1):
+            description = step.get('parameters', {}).get('description', '')
+            options = step.get('parameters', {}).get('options', {})
+            if 'max_steps' not in options:
+                options['max_steps'] = 8
+            async for update in self.orchestrator.execute_task_stream(description, options):
+                if update.get('type') == 'task_started':
+                    update['description'] = f"Template: {name}"
+                    update['template_step'] = i
+                yield update
+                if update.get('type') == 'task_failed':
+                    return
+
     def _resolve_variables(self, obj: Any, variables: Dict) -> Any:
         if isinstance(obj, str):
             for key, value in variables.items():
-                obj = obj.replace(f'{{{key}}}', str(value))
+                replacement = str(value)
+                if obj.startswith('http') and key.lower() not in ('url', 'uri'):
+                    replacement = quote_plus(replacement)
+                obj = obj.replace(f'{{{key}}}', replacement)
             return obj
         if isinstance(obj, dict):
             return {k: self._resolve_variables(v, variables) for k, v in obj.items()}

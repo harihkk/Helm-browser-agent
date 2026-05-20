@@ -1,4 +1,4 @@
-# Surf
+# Helm
 
 Drive a real browser with plain English. The agent reads the page,
 picks the next action, executes it, and repeats until done.
@@ -11,9 +11,9 @@ local Ollama) so it keeps working when free-tier quotas run out.
 Runs locally on your machine. No hosted version.
 
 ```bash
-git clone https://github.com/harihkk/surf-agentic-browser.git
-cd surf-agentic-browser
-cp .env.example .env       # add your Groq key
+git clone https://github.com/harihkk/helm-agentic-browser.git
+cd helm-agentic-browser
+cp .env.example .env       # add Groq, Gemini, or Ollama settings
 make dev                   # venv + deps + Chromium
 make run                   # server on :8000
 ```

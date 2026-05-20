@@ -107,20 +107,16 @@ class Database:
         """)
         await self._db.commit()
 
-        # Seed default templates
-        count = await self._db.execute("SELECT COUNT(*) FROM task_templates")
-        row = await count.fetchone()
-        if row[0] == 0:
-            await self._seed_templates()
+        # Seed or refresh built-in templates. This keeps the shipped
+        # templates useful after UI/agent upgrades without touching custom
+        # templates that use different names.
+        await self._sync_builtin_templates()
 
-    async def _seed_templates(self):
-        templates = [
+    def _builtin_templates(self):
+        return [
             ("Google Search", "Search Google for any query", "search",
              json.dumps([
-                 {"action": "navigate", "parameters": {"url": "https://www.google.com"}},
-                 {"action": "type", "parameters": {"selector": "textarea[name='q']", "text": "{query}"}},
-                 {"action": "press_key", "parameters": {"key": "Enter"}},
-                 {"action": "wait", "parameters": {"duration": 2}},
+                 {"action": "navigate", "parameters": {"url": "https://www.google.com/search?q={query}"}},
                  {"action": "extract", "parameters": {"target": "search results"}}
              ]),
              json.dumps(["query"])),
@@ -134,25 +130,44 @@ class Database:
             ("Take Screenshot", "Navigate to URL and take a screenshot", "utility",
              json.dumps([
                  {"action": "navigate", "parameters": {"url": "{url}"}},
-                 {"action": "wait", "parameters": {"duration": 3}}
+                 {"action": "wait", "parameters": {"duration": 1}}
              ]),
              json.dumps(["url"])),
-            ("Fill Form", "Fill out a web form with provided data", "automation",
+            ("Fill Form", "Use the agent to fill a form from your instructions", "automation",
              json.dumps([
-                 {"action": "navigate", "parameters": {"url": "{url}"}},
-                 {"action": "wait", "parameters": {"duration": 2}}
+                 {"action": "task", "parameters": {
+                     "description": "Open {url} and fill the form using these instructions: {instructions}"
+                 }}
              ]),
-             json.dumps(["url"])),
+             json.dumps(["url", "instructions"])),
             ("Wikipedia Search", "Search Wikipedia for information", "search",
              json.dumps([
-                 {"action": "navigate", "parameters": {"url": "https://en.wikipedia.org"}},
-                 {"action": "type", "parameters": {"selector": "#searchInput", "text": "{query}"}},
-                 {"action": "press_key", "parameters": {"key": "Enter"}},
-                 {"action": "wait", "parameters": {"duration": 2}},
+                 {"action": "navigate", "parameters": {"url": "https://en.wikipedia.org/w/index.php?search={query}"}},
                  {"action": "extract", "parameters": {"target": "article content"}}
              ]),
              json.dumps(["query"])),
         ]
+
+    async def _sync_builtin_templates(self):
+        for name, desc, cat, steps, vars_ in self._builtin_templates():
+            cursor = await self._db.execute(
+                "SELECT id FROM task_templates WHERE name = ?", (name,))
+            row = await cursor.fetchone()
+            if row:
+                await self._db.execute("""
+                    UPDATE task_templates
+                    SET description = ?, category = ?, steps_json = ?, variables = ?
+                    WHERE id = ?
+                """, (desc, cat, steps, vars_, row[0]))
+            else:
+                await self._db.execute(
+                    "INSERT INTO task_templates (name, description, category, steps_json, variables) VALUES (?, ?, ?, ?, ?)",
+                    (name, desc, cat, steps, vars_)
+                )
+        await self._db.commit()
+
+    async def _seed_templates(self):
+        templates = self._builtin_templates()
         for name, desc, cat, steps, vars_ in templates:
             await self._db.execute(
                 "INSERT INTO task_templates (name, description, category, steps_json, variables) VALUES (?, ?, ?, ?, ?)",

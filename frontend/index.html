@@ -1,520 +1,1599 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" data-theme="dark">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Surf</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Helm</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
 <style>
+/* ---------- tokens ---------- */
 :root{
-  /* Deep ocean dark theme */
-  --bg-0:#020617;--bg-1:#0a1428;--bg-2:#0f1d36;--bg-3:#1a2d4a;
-  --bg-hover:#1f3457;--text-0:#e0f2fe;--text-1:#7dd3fc;--text-2:#475569;
-  --border:#1e3a5f;--border-subtle:#142440;
-  --accent:#06b6d4;--accent-dim:rgba(6,182,212,.15);
-  --green:#10b981;--green-dim:rgba(16,185,129,.12);
-  --red:#f43f5e;--red-dim:rgba(244,63,94,.12);
-  --orange:#f59e0b;--orange-dim:rgba(245,158,11,.12);
-  --radius:6px;--font:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',Roboto,sans-serif;
-  --mono:'SF Mono','Fira Code','JetBrains Mono',Consolas,monospace;
+  --bg:#0E0E10;
+  --bg-2:#121215;
+  --surface:#16161B;
+  --surface-2:#1B1B22;
+  --surface-3:#21212A;
+  --hair:#26262E;
+  --hair-soft:#1F1F26;
+  --text:#ECECF0;
+  --text-mute:#8E8E98;
+  --text-dim:#5F5F69;
+  --accent:#D4A574;
+  --accent-strong:#E8B580;
+  --accent-soft:rgba(212,165,116,.10);
+  --accent-line:rgba(212,165,116,.34);
+  --ok:#7BAE8F;
+  --ok-soft:rgba(123,174,143,.10);
+  --warn:#D9B86C;
+  --warn-soft:rgba(217,184,108,.10);
+  --err:#D78A8A;
+  --err-soft:rgba(215,138,138,.10);
+  --stop:#DC2626;
+  --stop-hover:#B91C1C;
+  --shadow:0 24px 60px -20px rgba(0,0,0,.55), 0 1px 0 rgba(255,255,255,.02) inset;
+  --shadow-dock:0 -10px 30px -16px rgba(0,0,0,.55);
+  --radius:10px;
+  --radius-sm:7px;
+  --radius-lg:14px;
+  --font: 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "IBM Plex Mono", Menlo, monospace;
 }
 html[data-theme="light"]{
-  /* Light surf foam */
-  --bg-0:#f0f9ff;--bg-1:#e0f2fe;--bg-2:#bae6fd;--bg-3:#7dd3fc;
-  --bg-hover:#bae6fd;--text-0:#0c4a6e;--text-1:#0369a1;--text-2:#64748b;
-  --border:#bae6fd;--border-subtle:#e0f2fe;
-  --accent:#0891b2;--accent-dim:rgba(8,145,178,.1);
-  --green-dim:rgba(16,185,129,.08);--red-dim:rgba(244,63,94,.08);
-  --orange-dim:rgba(245,158,11,.08);
+  --bg:#FAFAF6;
+  --bg-2:#F3F2EC;
+  --surface:#FFFFFF;
+  --surface-2:#F6F4EE;
+  --surface-3:#EFEDE6;
+  --hair:#E2DFD7;
+  --hair-soft:#ECEAE2;
+  --text:#1A1A1F;
+  --text-mute:#5C5C64;
+  --text-dim:#9A9A9F;
+  --accent:#8B6F3F;
+  --accent-strong:#73592D;
+  --accent-soft:rgba(139,111,63,.09);
+  --accent-line:rgba(139,111,63,.30);
+  --ok:#5B8A6D;
+  --ok-soft:rgba(91,138,109,.10);
+  --warn:#A07A2E;
+  --warn-soft:rgba(160,122,46,.10);
+  --err:#A85A5A;
+  --err-soft:rgba(168,90,90,.10);
+  --stop:#DC2626;
+  --stop-hover:#B91C1C;
+  --shadow:0 22px 48px -22px rgba(20,18,14,.18), 0 1px 0 rgba(255,255,255,.6) inset;
+  --shadow-dock:0 -10px 24px -16px rgba(20,18,14,.16);
 }
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:var(--font);background:var(--bg-0);color:var(--text-0);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+@supports(font-variation-settings:normal){
+  :root{ --font: 'InterVariable', 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; }
+}
 
-.shell{display:flex;flex-direction:column;height:100vh}
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:0 20px;height:48px;border-bottom:1px solid var(--border);background:var(--bg-1);flex-shrink:0}
-.topbar-left{display:flex;align-items:center;gap:12px}
-.topbar-left h1{font-size:14px;font-weight:600;letter-spacing:-.01em}
-.topbar-left .sep{width:1px;height:16px;background:var(--border)}
-.topbar-left .tag{font-size:11px;color:var(--text-2);font-weight:500}
-.topbar-right{display:flex;align-items:center;gap:6px}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
-.dot.off{background:var(--red)}
-
-.nav{display:flex;gap:2px;padding:0 16px;height:40px;align-items:center;border-bottom:1px solid var(--border);background:var(--bg-1);flex-shrink:0;overflow-x:auto}
-.nav button{background:none;border:none;color:var(--text-2);font-size:13px;padding:8px 12px;border-radius:var(--radius);cursor:pointer;font-family:var(--font);font-weight:500;white-space:nowrap;transition:color .15s,background .15s}
-.nav button:hover{color:var(--text-0);background:var(--bg-hover)}
-.nav button.active{color:var(--text-0);background:var(--bg-2)}
-
-.panels{flex:1;overflow:hidden;display:flex;flex-direction:column}
-.panel{display:none;flex:1;overflow:auto;padding:20px}
-.panel.active{display:flex;flex-direction:column}
-
-.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-2);color:var(--text-0);font-size:13px;font-weight:500;cursor:pointer;font-family:var(--font);transition:all .15s;white-space:nowrap}
-.btn:hover{background:var(--bg-hover);border-color:var(--bg-3)}
-.btn:disabled{opacity:.4;cursor:default;pointer-events:none}
-.btn-accent{background:var(--accent);border-color:var(--accent);color:#fff}
-.btn-accent:hover{opacity:.9;background:var(--accent)}
-.btn-ghost{background:transparent;border-color:transparent}
-.btn-ghost:hover{background:var(--bg-2)}
-.btn-sm{padding:4px 10px;font-size:12px}
-.btn-danger{border-color:var(--red);color:var(--red)}
-.btn-danger:hover{background:var(--red-dim)}
-
-.input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-1);color:var(--text-0);font-size:14px;font-family:var(--font);resize:vertical;transition:border-color .15s}
-.input:focus{outline:none;border-color:var(--accent)}
-.input::placeholder{color:var(--text-2)}
-label{font-size:12px;font-weight:500;color:var(--text-1);display:block;margin-bottom:4px}
-
-.section{margin-bottom:20px}
-.section-title{font-size:12px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px}
-.card{background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:16px}
-
-.auto-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;flex:1;min-height:0}
-@media(max-width:640px){.auto-grid{grid-template-columns:1fr}}
-.auto-left,.auto-right{display:flex;flex-direction:column;gap:12px;min-height:0}
-.auto-right{overflow:hidden}
-
-/* Log */
-.log-wrap{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
-.log-header{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:var(--bg-2);border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;cursor:pointer;user-select:none}
-.log-header span{font-size:12px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.04em}
-.log-header .toggle{font-size:11px;color:var(--text-2)}
-.log-box{overflow-y:auto;background:var(--bg-0);border:1px solid var(--border);border-radius:0 0 8px 8px;padding:10px;font-family:var(--mono);font-size:12px;min-height:80px;max-height:300px;transition:max-height .3s}
-.log-box.collapsed{max-height:0;min-height:0;padding:0 10px;overflow:hidden;border-top:none}
-.log-line{padding:4px 8px;margin-bottom:2px;border-radius:4px;color:var(--text-1);border-left:2px solid transparent}
-.log-line.ok{border-left-color:var(--green);color:var(--text-0)}
-.log-line.err{border-left-color:var(--red);color:var(--red)}
-.log-line.think{border-left-color:var(--accent);color:var(--accent);cursor:pointer}
-.log-line .ts{color:var(--text-2);margin-right:6px;font-size:11px}
-
-/* Preview */
-.preview-wrap{background:#000;border-radius:8px;overflow:hidden;aspect-ratio:16/9;position:relative;border:1px solid var(--border)}
-.preview-wrap img{width:100%;height:100%;object-fit:contain;transition:opacity .15s ease}
-.preview-badge{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.7);color:#fff;padding:2px 8px;border-radius:4px;font-size:11px}
-
-.filmstrip{display:flex;gap:4px;overflow-x:auto;padding:4px 0}
-.filmstrip img{height:48px;border-radius:4px;border:1px solid var(--border);cursor:pointer;transition:border-color .15s}
-.filmstrip img:hover{border-color:var(--accent)}
-
-.progress-bar{height:3px;background:var(--bg-3);border-radius:2px;overflow:hidden;margin-top:8px}
-.progress-bar .fill{height:100%;background:var(--accent);width:0%;transition:width .3s}
-
-.quick-grid{display:flex;flex-wrap:wrap;gap:6px}
-.quick-btn{padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-1);color:var(--text-1);font-size:12px;cursor:pointer;transition:all .15s}
-.quick-btn:hover{color:var(--text-0);border-color:var(--bg-3);background:var(--bg-2)}
-
-.cost-pill{font-size:12px;color:var(--text-2);font-family:var(--mono)}
-
-.tmpl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
-.tmpl-card{background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:14px;transition:border-color .15s}
-.tmpl-card:hover{border-color:var(--bg-3)}
-.tmpl-name{font-weight:600;font-size:14px;margin-bottom:4px}
-.tmpl-desc{font-size:12px;color:var(--text-1);margin-bottom:10px}
-.tmpl-tag{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-2);background:var(--bg-2);padding:2px 6px;border-radius:3px;font-weight:600}
-
-table{width:100%;border-collapse:collapse}
-th{text-align:left;padding:8px 10px;font-size:11px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border)}
-td{padding:8px 10px;border-bottom:1px solid var(--border-subtle);font-size:13px}
-.badge{display:inline-block;padding:1px 8px;border-radius:4px;font-size:11px;font-weight:600}
-.badge-ok{background:var(--green-dim);color:var(--green)}
-.badge-err{background:var(--red-dim);color:var(--red)}
-
-.stat-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px}
-.stat{background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:16px;text-align:center}
-.stat-val{font-size:1.75rem;font-weight:700;letter-spacing:-.02em}
-.stat-lbl{font-size:11px;color:var(--text-2);margin-top:2px;text-transform:uppercase;letter-spacing:.04em}
-
-.list-item{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:6px;background:var(--bg-1)}
-.list-item-info{flex:1}
-.list-item-name{font-weight:500;font-size:13px}
-.list-item-sub{font-size:11px;color:var(--text-2)}
-.list-item-actions{display:flex;gap:6px}
-
-.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9000;align-items:center;justify-content:center}
-.modal-bg.on{display:flex}
-.modal{background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:24px;width:90%;max-width:440px}
-.modal h2{font-size:16px;font-weight:600;margin-bottom:16px}
-.modal .input{margin-bottom:10px}
-.modal .btn-row{display:flex;gap:8px;margin-top:14px}
-
-#toast-box{position:fixed;top:12px;right:12px;z-index:10000;display:flex;flex-direction:column;gap:6px}
-.toast{padding:10px 16px;border-radius:6px;font-size:13px;font-weight:500;color:#fff;animation:fadeIn .2s;max-width:320px}
-.toast-ok{background:#16a34a}.toast-err{background:#dc2626}.toast-warn{background:#d97706}.toast-info{background:var(--accent)}
-@keyframes fadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
-
-.voice-btn.on{background:var(--red);border-color:var(--red);color:#fff;animation:pulse 1s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
-
-::-webkit-scrollbar{width:5px;height:5px}
+/* ---------- reset ---------- */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13.5px;line-height:1.5;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-feature-settings:"ss01","cv11","cv02";}
+body{overflow:hidden}
+button,input,textarea,select{font:inherit;color:inherit;background:none;border:0}
+button{cursor:pointer}
+[hidden]{display:none!important}
+a{color:inherit}
+:focus-visible{outline:1.5px solid var(--accent);outline-offset:2px;border-radius:4px}
+.sr-only{position:absolute;width:1px;height:1px;clip:rect(0,0,0,0);overflow:hidden;white-space:nowrap}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--surface-3);border-radius:99px;border:2px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:var(--text-dim)}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--bg-3);border-radius:3px}
 
-.empty{color:var(--text-2);font-size:13px;padding:20px 0;text-align:center}
-.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.mt{margin-top:10px}.mb{margin-bottom:10px}
+/* ---------- shell ---------- */
+.shell{
+  display:grid;
+  grid-template-rows:auto 1fr auto;
+  height:100vh;
+  background:
+    radial-gradient(1100px 480px at 70% -10%, var(--accent-soft), transparent 60%),
+    var(--bg);
+}
+
+/* ---------- topbar ---------- */
+.topbar{
+  display:flex;
+  align-items:center;
+  gap:24px;
+  height:56px;
+  padding:0 18px;
+  border-bottom:1px solid var(--hair);
+  background:linear-gradient(var(--bg-2), var(--bg-2));
+  position:relative;
+  z-index:5;
+}
+.topbar-brand{display:flex;align-items:baseline;gap:10px;min-width:0}
+.brand-mark{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:28px;height:28px;color:var(--accent);align-self:center;
+  filter:drop-shadow(0 0 10px rgba(212,165,116,.22));
+}
+.brand-mark svg{width:28px;height:28px}
+.brand-name{
+  font-size:27px;
+  font-weight:850;
+  letter-spacing:-0.018em;
+  color:var(--text);
+}
+.brand-sub{
+  font-size:13px;
+  font-weight:400;
+  color:var(--text-mute);
+  letter-spacing:-0.005em;
+  padding-left:2px;
+}
+.topbar-actions{display:flex;align-items:center;gap:4px;margin-left:auto}
+.iconbtn{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:30px;height:30px;border-radius:8px;
+  color:var(--text-mute);
+  transition:background .15s ease, color .15s ease;
+}
+.iconbtn:hover{background:var(--surface-2);color:var(--text)}
+.iconbtn svg{width:15px;height:15px}
+
+/* ---------- workspace ---------- */
+.workspace{
+  display:grid;
+  grid-template-columns:1fr 380px;
+  gap:0;
+  min-height:0;
+  background:var(--bg);
+}
+body.inspector-closed .workspace{grid-template-columns:1fr 0}
+body.inspector-closed .inspector{transform:translateX(100%);pointer-events:none;opacity:0}
+body.screen-only .topbar,
+body.screen-only .dock,
+body.screen-only .inspector,
+body.screen-only .filmstrip{display:none}
+body.screen-only .shell{grid-template-rows:1fr;height:100vh}
+body.screen-only .workspace{grid-template-columns:1fr;height:100vh}
+body.screen-only .canvas{padding:0;gap:0}
+body.screen-only .canvas-frame{border:0;border-radius:0;box-shadow:none}
+
+/* ---------- canvas ---------- */
+.canvas{
+  display:flex;flex-direction:column;
+  min-width:0;min-height:0;
+  padding:14px 14px 8px 18px;
+  gap:10px;
+}
+.canvas-frame{
+  position:relative;
+  flex:1;min-height:0;
+  border:1px solid var(--hair);
+  border-radius:var(--radius-lg);
+  background:#000;
+  overflow:hidden;
+  box-shadow:var(--shadow);
+}
+.canvas-img{
+  position:absolute;inset:0;
+  width:100%;height:100%;
+  object-fit:contain;
+  background:#000;
+  transition:opacity .2s ease;
+}
+.canvas-empty{
+  position:absolute;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  background:
+    radial-gradient(circle at 50% 40%, rgba(212,165,116,.05), transparent 55%),
+    repeating-linear-gradient(0deg, transparent 0 23px, rgba(255,255,255,.014) 23px 24px),
+    repeating-linear-gradient(90deg, transparent 0 23px, rgba(255,255,255,.014) 23px 24px),
+    #0A0A0C;
+  color:var(--text-mute);
+  text-align:center;
+  padding:40px;
+}
+html[data-theme="light"] .canvas-empty{
+  background:
+    radial-gradient(circle at 50% 40%, rgba(139,111,63,.06), transparent 55%),
+    repeating-linear-gradient(0deg, transparent 0 23px, rgba(0,0,0,.018) 23px 24px),
+    repeating-linear-gradient(90deg, transparent 0 23px, rgba(0,0,0,.018) 23px 24px),
+    #F4F2EC;
+}
+.canvas-empty-inner{max-width:300px}
+.canvas-empty-mark{
+  width:34px;height:34px;margin:0 auto 16px;
+  border-radius:50%;
+  border:1.5px solid var(--accent-line);
+  position:relative;
+  color:var(--accent);
+}
+.canvas-empty-mark::before{
+  content:"";position:absolute;left:50%;top:50%;
+  width:1.5px;height:11px;
+  background:currentColor;
+  transform:translate(-50%,-100%) rotate(28deg);
+  transform-origin:bottom center;
+  border-radius:2px;
+}
+.canvas-empty-mark::after{
+  content:"";position:absolute;left:50%;top:50%;
+  width:5px;height:5px;border-radius:50%;
+  background:currentColor;
+  transform:translate(-50%,-50%);
+}
+.canvas-empty h3{
+  font-size:15px;font-weight:600;color:var(--text);
+  letter-spacing:-0.01em;margin-bottom:4px;
+}
+.canvas-empty p{font-size:12.5px;color:var(--text-mute)}
+.canvas-overlay-foot{
+  position:absolute;left:12px;right:12px;bottom:12px;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  pointer-events:none;
+  z-index:3;
+}
+.canvas-overlay-foot > *{pointer-events:auto}
+.browser-badge{
+  display:inline-flex;align-items:center;gap:7px;
+  height:26px;padding:0 10px 0 9px;
+  border-radius:99px;
+  background:rgba(10,10,12,.72);
+  border:1px solid rgba(255,255,255,.10);
+  color:rgba(236,236,240,.86);
+  font-size:11.5px;font-weight:500;
+  backdrop-filter:blur(10px);
+  transition:background .15s ease, border-color .15s ease;
+}
+.browser-badge:hover{background:rgba(20,20,24,.85);border-color:rgba(255,255,255,.18)}
+.browser-badge[aria-expanded="true"]{background:rgba(20,20,24,.92);border-color:var(--accent-line)}
+.canvas-chip{
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  height:26px;padding:0 10px;border-radius:99px;
+  background:rgba(10,10,12,.72);
+  border:1px solid rgba(255,255,255,.10);
+  color:rgba(236,236,240,.86);
+  font-size:11.5px;font-weight:500;
+  backdrop-filter:blur(10px);
+  transition:background .15s ease, border-color .15s ease, color .15s ease;
+}
+.canvas-chip:hover{background:rgba(20,20,24,.85);border-color:rgba(255,255,255,.18)}
+.canvas-chip.control-on{
+  background:rgba(123,174,143,.24);
+  border-color:rgba(123,174,143,.58);
+  color:#DDF4E7;
+}
+.canvas-chip.control-off{
+  background:rgba(20,20,24,.90);
+  border-color:rgba(255,255,255,.22);
+  color:rgba(236,236,240,.92);
+}
+.canvas-chip.screen-active{background:rgba(212,165,116,.22);border-color:var(--accent-line);color:#F2D4B4}
+.canvas-chip svg{width:13px;height:13px}
+.canvas-actions{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.browser-dot{width:6px;height:6px;border-radius:99px;background:var(--accent)}
+.browser-caret{margin-left:2px;color:rgba(236,236,240,.5);transition:transform .15s ease}
+.browser-badge[aria-expanded="true"] .browser-caret{transform:rotate(180deg)}
+.browser-wrap{position:relative;display:inline-flex}
+.browser-pop{
+  position:absolute;left:0;bottom:calc(100% + 6px);
+  min-width:200px;
+  background:rgba(14,14,16,.96);
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:9px;
+  padding:4px;
+  backdrop-filter:blur(14px);
+  box-shadow:0 14px 32px -10px rgba(0,0,0,.6);
+  z-index:5;
+}
+html[data-theme="light"] .browser-pop{
+  background:rgba(255,255,255,.98);
+  border-color:var(--hair);
+  box-shadow:0 14px 32px -10px rgba(20,18,14,.18);
+}
+.browser-pop[hidden]{display:none}
+.bpop-item{
+  display:flex;align-items:center;gap:9px;width:100%;
+  padding:8px 10px;
+  border-radius:6px;
+  color:rgba(236,236,240,.88);
+  font-size:12.5px;font-weight:500;
+  text-align:left;
+  transition:background .12s ease;
+}
+html[data-theme="light"] .bpop-item{color:var(--text)}
+.bpop-item:hover{background:rgba(255,255,255,.06)}
+html[data-theme="light"] .bpop-item:hover{background:var(--surface-2)}
+.bpop-item.active{background:var(--accent-soft);color:var(--accent)}
+.bpop-dot{width:6px;height:6px;border-radius:99px;background:var(--text-dim);flex:none}
+.bpop-item.active .bpop-dot{background:var(--accent)}
+.bpop-label{flex:1}
+.bpop-current{font-family:var(--mono);font-size:10.5px;color:var(--text-dim)}
+.bpop-item.busy{opacity:.5;pointer-events:none}
+.canvas-step-badge{
+  display:inline-flex;align-items:center;
+  height:26px;padding:0 10px;
+  border-radius:99px;
+  background:rgba(10,10,12,.72);
+  border:1px solid rgba(255,255,255,.10);
+  color:rgba(236,236,240,.66);
+  font-family:var(--mono);font-size:11px;
+  backdrop-filter:blur(10px);
+  font-variant-numeric:tabular-nums;
+}
+.filmstrip{
+  display:flex;gap:6px;
+  min-height:0;
+  overflow-x:auto;
+  padding:2px 0 4px;
+  scroll-snap-type:x mandatory;
+}
+.filmstrip::-webkit-scrollbar{height:4px}
+.filmstrip:empty{display:none}
+.filmstrip img{
+  height:42px;width:auto;
+  border-radius:5px;
+  border:1px solid var(--hair);
+  cursor:pointer;
+  scroll-snap-align:start;
+  transition:border-color .15s ease, transform .15s ease;
+  flex:0 0 auto;
+}
+.filmstrip img:hover{border-color:var(--accent);transform:translateY(-1px)}
+
+/* ---------- inspector ---------- */
+.inspector{
+  display:flex;flex-direction:column;
+  min-height:0;
+  border-left:1px solid var(--hair);
+  background:var(--bg-2);
+  transition:transform .22s ease, opacity .18s ease;
+}
+.inspector-tabs{
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px;
+  min-height:38px;
+  padding:6px;
+  border-bottom:1px solid var(--hair);
+  overflow:visible;
+  scrollbar-width:none;
+  flex-shrink:0;
+}
+.inspector-tabs::-webkit-scrollbar{display:none}
+.inspector-tab{
+  position:relative;
+  height:28px;
+  padding:0 10px;
+  border-radius:7px;
+  font-size:12.5px;font-weight:500;
+  color:var(--text-mute);
+  letter-spacing:-0.005em;
+  white-space:nowrap;
+  transition:background .12s ease, color .12s ease;
+}
+.inspector-tab:hover{background:var(--surface-2);color:var(--text)}
+.inspector-tab.active{background:var(--accent-soft);color:var(--accent)}
+.inspector-tab.active::after{
+  content:none;
+}
+.inspector-body{flex:1;min-height:0;overflow:auto}
+.ipanel{display:none;padding:14px 14px 18px;min-height:100%}
+.ipanel.active{display:block}
+.ipanel-head{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:12px;
+  font-size:13px;font-weight:600;color:var(--text);
+}
+
+/* log stream */
+.log-stream{display:flex;flex-direction:column;gap:0;font-size:12.5px}
+.log-stream:empty::before{
+  content:"waiting for activity";
+  display:block;padding:14px 2px;
+  color:var(--text-dim);font-size:12px;font-family:var(--mono);
+  letter-spacing:-0.005em;
+}
+.log-line, .log-line summary{
+  display:grid;
+  grid-template-columns:58px 12px 1fr;
+  column-gap:10px;
+  align-items:baseline;
+  padding:3px 2px;
+  color:var(--text);
+  line-height:1.55;
+}
+.log-line summary{padding:3px 2px;cursor:pointer;list-style:none}
+.log-line.think{display:block;padding:0}
+.log-line + .log-line{margin-top:1px}
+.log-line .ts, .log-line time{
+  font-family:var(--mono);font-size:10.5px;
+  color:var(--text-dim);
+  font-variant-numeric:tabular-nums;
+  letter-spacing:-0.01em;
+  white-space:nowrap;
+}
+.log-glyph{
+  font-family:var(--mono);font-size:11.5px;
+  color:var(--text-dim);
+  line-height:1;
+  text-align:center;
+  user-select:none;
+}
+.log-msg{color:var(--text);min-width:0;word-break:break-word}
+.log-line.ok .log-glyph{color:var(--ok)}
+.log-line.err .log-glyph{color:var(--err)}
+.log-line.err .log-msg{color:var(--err)}
+.log-line.think .log-glyph{color:var(--accent);transition:transform .15s ease}
+.log-line.think[open] .log-glyph{transform:rotate(90deg)}
+.log-line.think summary::-webkit-details-marker{display:none}
+.log-line.think .log-msg{color:var(--accent);font-weight:500}
+.log-line.think pre{
+  margin:2px 0 6px 80px;
+  font-family:var(--mono);font-size:11.5px;
+  color:var(--text-mute);
+  white-space:pre-wrap;
+  word-break:normal;
+  overflow-wrap:anywhere;
+  background:var(--surface-2);
+  padding:8px 10px;
+  border-radius:6px;
+  border:1px solid var(--hair-soft);
+  line-height:1.55;
+}
+.log-title{display:block;font-weight:600;color:var(--text)}
+.log-body{display:block;color:var(--text-mute);font-size:12px;margin-top:1px}
+
+/* diagnostics */
+.diag-list{display:flex;flex-direction:column;gap:0}
+.diag-row{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:12px 4px;
+  border-bottom:1px solid var(--hair-soft);
+  font-size:12.5px;
+}
+.diag-row:last-child{border-bottom:0}
+.diag-row.diag-stack{flex-direction:column;align-items:stretch;gap:8px}
+.diag-key{color:var(--text-mute);font-weight:500}
+.diag-val{color:var(--text);font-family:var(--mono);font-size:12px;display:inline-flex;align-items:center;gap:6px}
+.diag-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.diag-state{color:var(--text-mute);font-family:var(--mono);font-size:12px}
+.diag-help{color:var(--text-mute);font-size:12px;margin-bottom:4px;line-height:1.55;font-family:var(--font)}
+.diag-help code{font-family:var(--mono);background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:11.5px;border:1px solid var(--hair-soft)}
+.diag-setup{flex-direction:column;align-items:flex-start;gap:6px}
+.diag-seg{display:inline-flex;border:1px solid var(--hair);border-radius:7px;overflow:hidden;background:var(--surface)}
+.diag-seg button{
+  height:28px;padding:0 10px;border-right:1px solid var(--hair);
+  color:var(--text-mute);font-size:12px;font-weight:500;
+}
+.diag-seg button:last-child{border-right:0}
+.diag-seg button:hover{background:var(--surface-2);color:var(--text)}
+.diag-seg button.active{background:var(--accent-soft);color:var(--accent)}
+.diag-code{
+  font-family:var(--mono);font-size:11.5px;
+  padding:3px 7px;border-radius:5px;
+  background:var(--surface);border:1px solid var(--hair);
+  color:var(--text-mute);
+}
+/* guide */
+.guide-grid{display:grid;grid-template-columns:1fr;gap:8px}
+.guide-card{
+  padding:12px;
+  border:1px solid var(--hair);
+  border-radius:9px;
+  background:var(--surface);
+}
+.guide-title{font-size:12.5px;font-weight:650;color:var(--text);margin-bottom:3px}
+.guide-card p{font-size:12px;line-height:1.5;color:var(--text-mute)}
+
+/* templates */
+.tmpl-grid{display:grid;grid-template-columns:1fr;gap:8px}
+.tmpl-card{
+  padding:12px;
+  border:1px solid var(--hair);
+  border-radius:9px;
+  background:var(--surface);
+  transition:border-color .12s ease, background .12s ease;
+}
+.tmpl-card:hover{border-color:var(--accent-line);background:var(--surface-2)}
+.tmpl-name{font-weight:600;font-size:13px;color:var(--text);margin-bottom:3px}
+.tmpl-desc{font-size:12px;color:var(--text-mute);margin-bottom:10px;line-height:1.5}
+.tmpl-tag{
+  font-size:10.5px;font-weight:500;
+  color:var(--accent);background:var(--accent-soft);
+  padding:2px 7px;border-radius:99px;
+  text-transform:lowercase;
+}
+
+/* tables / lists */
+.data-table{width:100%;border-collapse:collapse;font-size:12px}
+.data-table th{
+  text-align:left;padding:8px 10px;
+  font-weight:500;color:var(--text-mute);
+  border-bottom:1px solid var(--hair);
+  font-size:11px;
+  letter-spacing:0;
+}
+.data-table td{
+  padding:9px 10px;
+  border-bottom:1px solid var(--hair-soft);
+  color:var(--text);
+}
+.data-table td .badge{font-family:var(--mono);font-size:10.5px;padding:1px 6px;border-radius:99px}
+.data-table td .badge-ok{background:var(--ok-soft);color:var(--ok)}
+.data-table td .badge-err{background:var(--err-soft);color:var(--err)}
+.list-item{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:11px 12px;
+  border:1px solid var(--hair);
+  border-radius:9px;
+  background:var(--surface);
+  margin-bottom:8px;
+}
+.list-item-info{flex:1;min-width:0}
+.list-item-name{font-size:13px;font-weight:600;color:var(--text)}
+.list-item-sub{font-size:11.5px;color:var(--text-mute);margin-top:2px;font-family:var(--mono)}
+.list-item-actions{display:flex;gap:6px}
+.empty{
+  color:var(--text-mute);font-size:12.5px;
+  padding:24px 16px;text-align:center;
+  border:1px dashed var(--hair);
+  border-radius:9px;
+}
+
+/* analytics */
+.stat-row{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
+.stat{
+  padding:14px;
+  border:1px solid var(--hair);border-radius:9px;
+  background:var(--surface);
+}
+.stat-val{font-size:22px;font-weight:700;color:var(--text);letter-spacing:-0.02em;font-variant-numeric:tabular-nums}
+.stat-lbl{font-size:11px;color:var(--text-mute);margin-top:3px}
+
+/* ---------- buttons (quiet) ---------- */
+.btn-quiet, .btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  height:28px;padding:0 11px;
+  font-size:12px;font-weight:500;
+  color:var(--text);
+  background:var(--surface);
+  border:1px solid var(--hair);
+  border-radius:7px;
+  transition:background .12s ease, border-color .12s ease, color .12s ease;
+}
+.btn-quiet:hover, .btn:hover{background:var(--surface-2);border-color:var(--hair-soft);color:var(--text)}
+.btn-quiet:active, .btn:active{background:var(--surface-3)}
+.btn-quiet:disabled, .btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-accent{
+  background:var(--accent);color:#1A1208;border-color:var(--accent);
+}
+.btn-accent:hover{background:var(--accent-strong);border-color:var(--accent-strong);color:#1A1208}
+.btn-danger{color:var(--err);background:var(--err-soft);border-color:var(--err-soft)}
+.btn-danger:hover{background:var(--err-soft);border-color:var(--err);color:var(--err)}
+a.btn,a.btn-quiet{text-decoration:none}
+
+.selectish, input.input, textarea.input{
+  height:28px;padding:0 9px;
+  background:var(--surface);
+  border:1px solid var(--hair);
+  border-radius:7px;
+  color:var(--text);
+  font-size:12px;
+  min-width:0;
+}
+textarea.input{height:auto;padding:8px 9px;line-height:1.55;resize:vertical;font-family:var(--font)}
+.selectish:focus, input.input:focus, textarea.input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.selectish{appearance:none;background-image:linear-gradient(45deg, transparent 50%, var(--text-mute) 50%), linear-gradient(135deg, var(--text-mute) 50%, transparent 50%);background-position:calc(100% - 14px) 13px, calc(100% - 10px) 13px;background-size:4px 4px, 4px 4px;background-repeat:no-repeat;padding-right:26px}
+
+/* ---------- dock ---------- */
+.dock{
+  position:relative;
+  padding:10px 18px 14px;
+  background:linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+  border-top:1px solid var(--hair);
+  z-index:6;
+}
+.dock-status{
+  display:flex;align-items:center;gap:8px;
+  height:22px;
+  padding:0 6px;
+  font-family:var(--mono);font-size:11.5px;
+  color:var(--text-mute);
+  margin-bottom:6px;
+}
+.dock-status[hidden]{display:none}
+.dock-status::before{
+  content:"";width:5px;height:5px;border-radius:99px;
+  background:var(--accent);
+  box-shadow:0 0 10px var(--accent);
+  animation:dockPulse 1.8s ease-in-out infinite;
+}
+@keyframes dockPulse{0%,100%{opacity:.5;transform:scale(.85)}50%{opacity:1;transform:scale(1)}}
+.dock-status-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.dock-frame{
+  display:flex;align-items:flex-end;gap:8px;
+  padding:10px 10px 10px 14px;
+  background:var(--surface);
+  border:1px solid var(--hair);
+  border-radius:12px;
+  box-shadow:var(--shadow);
+  transition:border-color .15s ease, box-shadow .15s ease;
+}
+.dock-frame:focus-within{
+  border-color:var(--accent);
+  box-shadow:0 0 0 3px var(--accent-soft), var(--shadow);
+}
+.dock-icon{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:32px;height:32px;flex:none;
+  border-radius:8px;
+  color:var(--text-mute);
+  background:transparent;
+  transition:background .15s ease, color .15s ease, box-shadow .2s ease;
+}
+.dock-icon:hover{background:var(--surface-2);color:var(--text)}
+.dock-icon.on{
+  color:var(--accent);
+  background:var(--accent-soft);
+  box-shadow:0 0 0 1px var(--accent-line) inset;
+}
+.dock-icon.on svg{animation:micPulse 1.6s ease-in-out infinite}
+@keyframes micPulse{0%,100%{opacity:.7}50%{opacity:1}}
+.dock-input{
+  flex:1;min-width:0;
+  border:0;background:transparent;
+  font-size:14px;line-height:1.5;
+  color:var(--text);
+  resize:none;
+  padding:6px 0;
+  max-height:160px;
+  font-family:var(--font);
+}
+.dock-input::placeholder{color:var(--text-dim)}
+.dock-input:focus{outline:none}
+.dock-run{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:34px;height:34px;flex:none;
+  border-radius:8px;
+  background:var(--accent);color:#1A1208;
+  transition:background .15s ease, transform .1s ease, opacity .12s ease;
+}
+.dock-run:hover{background:var(--accent-strong)}
+.dock-run:active{transform:scale(.96)}
+.dock-run:disabled{opacity:.4;cursor:not-allowed}
+.dock-stop{
+  background:#FF1F1F;
+  color:#fff;
+  box-shadow:0 0 0 1px rgba(255,255,255,.18) inset, 0 0 16px rgba(255,31,31,.28);
+}
+.dock-stop:hover{background:#F00000}
+.dock-stop:disabled{opacity:1}
+.dock-progress{
+  position:absolute;left:18px;right:18px;top:-1px;
+  height:1px;
+  background:transparent;
+  pointer-events:none;
+}
+.dock-progress-fill{
+  height:100%;width:0%;
+  background:linear-gradient(90deg, transparent, var(--accent) 50%, var(--accent-strong));
+  transition:width .35s ease;
+}
+
+/* palette */
+.palette{
+  position:absolute;
+  left:18px;right:18px;
+  bottom:calc(100% + 6px);
+  background:var(--surface);
+  border:1px solid var(--hair);
+  border-radius:10px;
+  box-shadow:var(--shadow);
+  max-height:280px;overflow:auto;
+  padding:4px;
+  z-index:10;
+}
+.palette[hidden]{display:none}
+.pal-item{
+  display:flex;align-items:baseline;gap:12px;width:100%;
+  padding:8px 10px;
+  border-radius:6px;
+  text-align:left;
+  color:var(--text);
+  transition:background .1s ease;
+}
+.pal-item:hover, .pal-item.active{background:var(--surface-2)}
+.pal-item.active{background:var(--accent-soft)}
+.pal-key{
+  font-family:var(--mono);font-size:12px;
+  color:var(--accent);
+  font-weight:500;
+  min-width:90px;
+}
+.pal-label{font-size:12.5px;color:var(--text-mute)}
+.pal-item.active .pal-label{color:var(--text)}
+
+/* ---------- modals ---------- */
+.modal-bg{
+  display:none;
+  position:fixed;inset:0;
+  background:rgba(8,8,10,.62);
+  backdrop-filter:blur(8px);
+  z-index:100;
+  align-items:center;justify-content:center;
+  padding:24px;
+}
+.modal-bg.on{display:flex}
+.modal{
+  width:100%;max-width:440px;
+  background:var(--surface);
+  border:1px solid var(--hair);
+  border-radius:14px;
+  padding:22px;
+  box-shadow:var(--shadow);
+}
+.modal h2{font-size:15px;font-weight:600;margin-bottom:14px;color:var(--text);letter-spacing:-0.01em}
+.modal-sub{font-size:12px;line-height:1.5;color:var(--text-mute);margin:-8px 0 12px}
+.modal label, label{display:block;font-size:11.5px;font-weight:500;color:var(--text-mute);margin:10px 0 5px}
+.modal .input{width:100%;height:32px}
+.modal textarea.input{height:auto;min-height:90px}
+.modal .btn-row{display:flex;gap:8px;margin-top:18px;justify-content:flex-end}
+
+/* ---------- toasts ---------- */
+#toast-box{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
+.toast{
+  pointer-events:auto;
+  padding:10px 14px;
+  border-radius:8px;
+  font-size:12.5px;font-weight:500;
+  background:var(--surface);
+  border:1px solid var(--hair);
+  color:var(--text);
+  box-shadow:var(--shadow);
+  animation:toastIn .2s ease;
+  max-width:380px;
+}
+.toast-ok{border-color:var(--ok);color:var(--ok)}
+.toast-err{border-color:var(--err);color:var(--err)}
+.toast-warn{border-color:var(--warn);color:var(--warn)}
+.toast-info{border-color:var(--accent-line);color:var(--accent)}
+@keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* ---------- responsive ---------- */
+@media(max-width:1100px){
+  .workspace{grid-template-columns:1fr 340px}
+}
+@media(max-width:880px){
+  body{overflow:auto}
+  .shell{height:auto;min-height:100vh;grid-template-rows:auto auto auto}
+  .workspace{grid-template-columns:1fr;grid-template-rows:auto auto;height:auto}
+  .canvas{padding:12px;min-height:60vh}
+  .inspector{border-left:0;border-top:1px solid var(--hair);min-height:340px}
+  body.inspector-closed .inspector{display:none}
+  .topbar{height:auto;padding:10px 14px;flex-wrap:wrap;gap:10px}
+  .topbar-actions{margin-left:auto}
+  .dock{padding:10px 12px 14px}
+  .palette{left:12px;right:12px}
+}
+@media(max-width:520px){
+  .brand-sub{display:none}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}
+}
 </style>
 </head>
 <body>
 <div class="shell">
-  <div class="topbar">
-    <div class="topbar-left">
-      <h1>Surf</h1>
-      <div class="sep"></div>
-      <span class="tag" id="aiTag" title="AI provider cascade">...</span>
-      <span class="cost-pill" id="costPill" title="Tokens used this session (free tier)">0 tok</span>
-    </div>
-    <div class="topbar-right">
-      <button class="btn btn-ghost btn-sm" onclick="toggleTheme()" id="themeBtn">Light</button>
-      <button class="btn btn-ghost btn-sm" onclick="takeScreenshot()">Capture</button>
-      <div class="dot" id="connDot"></div>
-    </div>
-  </div>
 
-  <div class="nav" id="nav">
-    <button class="active" data-t="auto">Automation</button>
-    <button data-t="templates">Templates</button>
-    <button data-t="history">History</button>
-    <button data-t="recordings">Recordings</button>
-    <button data-t="workflows">Workflows</button>
-    <button data-t="scheduled">Scheduled</button>
-    <button data-t="analytics">Analytics</button>
-  </div>
+  <!-- TOPBAR -->
+  <header class="topbar" role="banner">
+    <div class="topbar-brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 22 22" width="22" height="22" fill="none">
+          <circle cx="11" cy="11" r="8.5" stroke="currentColor" stroke-width="1.4"/>
+          <path d="M11 11 L15.2 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          <circle cx="11" cy="11" r="1.5" fill="currentColor"/>
+        </svg>
+      </span>
+      <h1 class="brand-name">Helm</h1>
+      <span class="brand-sub">agentic workflow</span>
+    </div>
 
-  <div class="panels">
-    <!-- AUTOMATION -->
-    <div class="panel active" id="p-auto">
-      <div class="auto-grid">
-        <div class="auto-left">
-          <div class="card">
-            <textarea id="taskInput" class="input" rows="4" placeholder="Describe what you want to automate..."></textarea>
-            <div class="row mt">
-              <button class="btn btn-accent" id="runBtn" onclick="runTask()">Run</button>
-              <button class="btn btn-danger btn-sm" id="stopBtn" onclick="stopTask()" disabled>Stop</button>
-              <button class="btn btn-ghost btn-sm" onclick="clearAll()">Clear</button>
-              <button class="btn btn-ghost btn-sm voice-btn" id="voiceBtn" onclick="toggleVoice()">Mic</button>
-              <button class="btn btn-ghost btn-sm" onclick="extractData()">Extract Data</button>
-            </div>
-            <div class="progress-bar mt"><div class="fill" id="progFill"></div></div>
-            <div class="row mt" style="justify-content:space-between">
-              <span style="font-size:12px;color:var(--text-2)" id="statusLabel">Ready</span>
-            </div>
+    <div class="topbar-actions">
+      <button class="iconbtn" id="themeBtn" onclick="toggleTheme()" title="Toggle theme (⌘D)" aria-label="Toggle theme">
+        <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="8" cy="8" r="3.2"/>
+          <path d="M8 1.5v1.6M8 12.9v1.6M2.7 2.7l1.1 1.1M12.2 12.2l1.1 1.1M1.5 8h1.6M12.9 8h1.6M2.7 13.3l1.1-1.1M12.2 3.8l1.1-1.1"/>
+        </svg>
+      </button>
+      <button class="iconbtn" id="inspectorBtn" onclick="toggleInspector()" title="Toggle inspector (⌘\)" aria-label="Toggle inspector">
+        <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+          <rect x="1.6" y="2.8" width="12.8" height="10.4" rx="1.6"/>
+          <line x1="10" y1="2.8" x2="10" y2="13.2"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- WORKSPACE -->
+  <div class="workspace">
+
+    <!-- canvas / live preview -->
+    <section class="canvas" aria-label="Live browser preview">
+      <div class="canvas-frame">
+        <img id="prevImg" class="canvas-img" alt="" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">
+        <div class="canvas-empty" id="previewEmpty">
+          <div class="canvas-empty-inner">
+            <div class="canvas-empty-mark" aria-hidden="true"></div>
+            <h3>Ready when you are</h3>
+            <p>Type a task below, or press <kbd>/</kbd> for commands.</p>
           </div>
-          <div>
-            <div class="section-title">Quick tasks</div>
-            <div class="quick-grid">
-              <button class="quick-btn" onclick="setTask('Go to Google and search for artificial intelligence news')">Google Search</button>
-              <button class="quick-btn" onclick="setTask('Navigate to Wikipedia and search for machine learning')">Wikipedia</button>
-              <button class="quick-btn" onclick="setTask('Go to news.ycombinator.com and extract the top 10 stories')">Hacker News</button>
-              <button class="quick-btn" onclick="setTask('Go to github.com/trending and list the top trending repos')">GitHub Trending</button>
+        </div>
+        <div class="canvas-overlay-foot">
+          <div class="browser-wrap">
+            <button class="browser-badge" id="browserBadge" onclick="toggleBrowserPop(event)" title="Switch browser" aria-haspopup="listbox" aria-expanded="false">
+              <span class="browser-dot" aria-hidden="true"></span>
+              <span id="browserLabel">Built-in</span>
+              <svg class="browser-caret" viewBox="0 0 10 6" width="9" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div class="browser-pop" id="browserPop" role="listbox" hidden></div>
+          </div>
+          <div class="canvas-actions">
+            <button class="canvas-chip control-on" id="controlBtn" onclick="toggleBrowserControl()" type="button" title="Toggle browser control">Control on</button>
+            <button class="canvas-chip" id="screenOnlyBtn" onclick="toggleScreenOnly()" type="button" title="Screen only">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5.2 2.8H2.8v2.4M10.8 2.8h2.4v2.4M13.2 10.8v2.4h-2.4M5.2 13.2H2.8v-2.4"/>
+              </svg>
+              <span id="screenOnlyText">Screen</span>
+            </button>
+            <span class="canvas-step-badge" id="prevBadge">no preview</span>
+          </div>
+        </div>
+      </div>
+      <div class="filmstrip" id="filmstrip" aria-label="Step screenshots"></div>
+    </section>
+
+    <!-- inspector drawer -->
+    <aside class="inspector" id="inspector" aria-label="Inspector">
+      <nav class="inspector-tabs" role="tablist">
+        <button class="inspector-tab active" data-t="templates" role="tab" aria-selected="true">Templates</button>
+        <button class="inspector-tab" data-t="history" role="tab">History</button>
+        <button class="inspector-tab" data-t="recordings" role="tab">Recordings</button>
+        <button class="inspector-tab" data-t="workflows" role="tab">Workflows</button>
+        <button class="inspector-tab" data-t="scheduled" role="tab">Scheduled</button>
+        <button class="inspector-tab" data-t="analytics" role="tab">Analytics</button>
+        <button class="inspector-tab" data-t="provider" role="tab">Provider</button>
+        <button class="inspector-tab" data-t="guide" role="tab">Guide</button>
+        <button class="inspector-tab" data-t="log" role="tab">Log</button>
+      </nav>
+
+      <div class="inspector-body">
+
+        <div class="ipanel active" id="ip-templates" role="tabpanel">
+          <div class="tmpl-grid" id="tmplGrid"></div>
+        </div>
+
+        <div class="ipanel" id="ip-history" role="tabpanel">
+          <table class="data-table">
+            <thead><tr><th>Time</th><th>Task</th><th>Status</th><th>Steps</th><th>Cost</th><th>Duration</th></tr></thead>
+            <tbody id="histBody"></tbody>
+          </table>
+        </div>
+
+        <div class="ipanel" id="ip-recordings" role="tabpanel"><div id="recList"></div></div>
+
+        <div class="ipanel" id="ip-workflows" role="tabpanel">
+          <div class="ipanel-head"><span>Workflows</span><button class="btn-quiet" onclick="openModal('wfModal')">New workflow</button></div>
+          <div id="wfList"></div>
+        </div>
+
+        <div class="ipanel" id="ip-scheduled" role="tabpanel">
+          <div class="ipanel-head"><span>Scheduled</span><button class="btn-quiet" onclick="openModal('schedModal')">Schedule task</button></div>
+          <div id="schedList"></div>
+        </div>
+
+        <div class="ipanel" id="ip-analytics" role="tabpanel">
+          <div class="stat-row" id="statRow"></div>
+          <div id="chartArea"></div>
+        </div>
+
+        <div class="ipanel" id="ip-provider" role="tabpanel">
+          <div class="diag-list">
+            <div class="diag-row"><span class="diag-key">Current</span><span class="diag-val" id="providerState">checking…</span></div>
+            <div class="diag-row">
+              <span class="diag-key">Mode</span>
+              <div class="diag-controls">
+                <div class="diag-seg" id="providerModeSeg" role="group" aria-label="Provider mode">
+                  <button type="button" data-mode="api" onclick="setProviderMode('api')">API</button>
+                  <button type="button" data-mode="local" onclick="setProviderMode('local')">Local</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="auto-right">
-          <div class="row mb" style="gap:6px;font-size:12px;align-items:center">
-            <span style="color:var(--text-2);font-weight:600" id="browserLabel">Built-in</span>
-            <select id="browserSelect" class="input" style="width:auto;padding:2px 8px;font-size:12px;height:28px;flex:0 0 auto">
-              <option value="">Built-in Chromium</option>
-            </select>
-            <button class="btn btn-sm" onclick="switchBrowser()" id="switchBtn">Switch</button>
-          </div>
-          <div class="preview-wrap">
-            <img id="prevImg" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="">
-            <span class="preview-badge" id="prevBadge">No preview</span>
-          </div>
-          <div class="filmstrip" id="filmstrip"></div>
-          <div class="log-wrap">
-            <div class="log-header" onclick="toggleLogs()">
-              <span>Logs</span>
-              <span class="toggle" id="logToggle">Hide</span>
-            </div>
-            <div class="log-box" id="logBox">
-              <div class="log-line ok"><span class="ts">--:--:--</span>System ready</div>
-            </div>
+        <div class="ipanel" id="ip-guide" role="tabpanel">
+          <div class="guide-grid">
+            <div class="guide-card"><div class="guide-title">Run</div><p>Describe the job in the dock. Press Enter to run, Esc to stop.</p></div>
+            <div class="guide-card"><div class="guide-title">Browser</div><p>Use Built-in for preview-first work. Switch browsers from the badge on the canvas.</p></div>
+            <div class="guide-card"><div class="guide-title">Control</div><p>Control on lets preview clicks drive the browser. View only blocks manual clicks.</p></div>
+            <div class="guide-card"><div class="guide-title">Modes</div><p>Choose API or Local in Provider. Local needs Ollama running with a selected model.</p></div>
+            <div class="guide-card"><div class="guide-title">Reuse</div><p>Templates, Workflows, Scheduled, and Recordings turn repeated tasks into saved flows.</p></div>
+            <div class="guide-card"><div class="guide-title">Commands</div><p>Press / in the task box for quick actions like capture, clear, extract, and screen.</p></div>
           </div>
         </div>
+
+        <div class="ipanel" id="ip-log" role="tabpanel">
+          <div id="logBox" class="log-stream"></div>
+        </div>
+
       </div>
-    </div>
-
-    <!-- TEMPLATES -->
-    <div class="panel" id="p-templates">
-      <div class="section-title mb">Task Templates</div>
-      <div class="tmpl-grid" id="tmplGrid"></div>
-    </div>
-
-    <!-- HISTORY -->
-    <div class="panel" id="p-history">
-      <div class="section-title mb">Task History</div>
-      <div class="card" style="padding:0;overflow-x:auto">
-        <table><thead><tr><th>Time</th><th>Task</th><th>Status</th><th>Steps</th><th>Cost</th><th>Duration</th></tr></thead>
-        <tbody id="histBody"></tbody></table>
-      </div>
-    </div>
-
-    <!-- RECORDINGS -->
-    <div class="panel" id="p-recordings">
-      <div class="section-title mb">Session Recordings</div>
-      <div id="recList"></div>
-    </div>
-
-    <!-- WORKFLOWS -->
-    <div class="panel" id="p-workflows">
-      <div class="row mb" style="justify-content:space-between">
-        <div class="section-title">Workflows</div>
-        <button class="btn btn-sm" onclick="openModal('wfModal')">New workflow</button>
-      </div>
-      <div id="wfList"></div>
-    </div>
-
-    <!-- SCHEDULED -->
-    <div class="panel" id="p-scheduled">
-      <div class="row mb" style="justify-content:space-between">
-        <div class="section-title">Scheduled Tasks</div>
-        <button class="btn btn-sm" onclick="openModal('schedModal')">Schedule task</button>
-      </div>
-      <div id="schedList"></div>
-    </div>
-
-    <!-- ANALYTICS -->
-    <div class="panel" id="p-analytics">
-      <div class="section-title mb">Analytics</div>
-      <div class="stat-row mb" id="statRow"></div>
-      <div id="chartArea"></div>
-    </div>
+    </aside>
   </div>
+
+  <div hidden aria-hidden="true">
+    <span id="statusLabel">Ready</span>
+    <select id="browserSelect"><option value="">Built-in Chromium</option></select>
+    <button id="switchBtn" type="button">Switch</button>
+  </div>
+
+  <!-- DOCK -->
+  <footer class="dock" role="form">
+    <div class="dock-progress"><div class="dock-progress-fill" id="progFill"></div></div>
+    <div class="dock-status" id="dockStatus" hidden><span class="dock-status-text"></span></div>
+    <div class="dock-frame">
+      <label class="sr-only" for="taskInput">Describe a task</label>
+      <textarea id="taskInput" class="dock-input" rows="1" placeholder="Describe a task"></textarea>
+      <button class="dock-icon" id="voiceBtn" onclick="toggleVoice()" aria-label="Voice input" title="Voice input" hidden>
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="5.6" y="2" width="4.8" height="8.2" rx="2.4"/>
+          <path d="M3.2 7.6a4.8 4.8 0 009.6 0M8 12.4V14.4M5.6 14.4h4.8"/>
+        </svg>
+      </button>
+      <button class="dock-run" id="runBtn" onclick="runTask()" aria-label="Run task" title="Run (⌘⏎)">
+        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M4 3l9 5-9 5V3z" fill="currentColor"/></svg>
+      </button>
+      <button class="dock-run dock-stop" id="stopBtn" onclick="stopTask()" aria-label="Stop task" title="Stop (Esc)" hidden disabled>
+        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.4" fill="currentColor"/></svg>
+      </button>
+    </div>
+    <div class="palette" id="palette" hidden role="listbox"></div>
+  </footer>
+
 </div>
 
-<!-- Modals -->
-<div class="modal-bg" id="schedModal"><div class="modal">
+<!-- modals -->
+<div class="modal-bg" id="schedModal"><div class="modal" role="dialog" aria-label="Schedule a task">
   <h2>Schedule a task</h2>
   <label>Name</label><input class="input" id="sName" placeholder="Price monitor">
   <label>Task description</label><input class="input" id="sDesc" placeholder="Check laptop prices on Amazon">
   <label>Interval (e.g. 5m, 1h, 1d)</label><input class="input" id="sInt" placeholder="1h">
-  <div class="btn-row"><button class="btn btn-accent" onclick="createSched()">Create</button><button class="btn" onclick="closeModal('schedModal')">Cancel</button></div>
+  <div class="btn-row"><button class="btn" onclick="closeModal('schedModal')">Cancel</button><button class="btn btn-accent" onclick="createSched()">Schedule</button></div>
 </div></div>
 
-<div class="modal-bg" id="wfModal"><div class="modal">
+<div class="modal-bg" id="wfModal"><div class="modal" role="dialog" aria-label="New workflow">
   <h2>New workflow</h2>
   <label>Name</label><input class="input" id="wfName" placeholder="My workflow">
   <label>Description</label><input class="input" id="wfDescI" placeholder="What does it do?">
   <label>Steps (one task per line)</label>
   <textarea class="input" id="wfSteps" rows="4" placeholder="Go to Google and search for AI news&#10;Extract the top 5 results"></textarea>
-  <div class="btn-row"><button class="btn btn-accent" onclick="createWf()">Create</button><button class="btn" onclick="closeModal('wfModal')">Cancel</button></div>
+  <div class="btn-row"><button class="btn" onclick="closeModal('wfModal')">Cancel</button><button class="btn btn-accent" onclick="createWf()">Create</button></div>
 </div></div>
 
-<div class="modal-bg" id="tmplModal"><div class="modal">
+<div class="modal-bg" id="tmplModal"><div class="modal" role="dialog" aria-label="Run template">
   <h2 id="tmplModalTitle">Run template</h2>
+  <p class="modal-sub" id="tmplModalDesc"></p>
   <div id="tmplVars"></div>
-  <div class="btn-row"><button class="btn btn-accent" onclick="execTmpl()">Run</button><button class="btn" onclick="closeModal('tmplModal')">Cancel</button></div>
+  <div class="btn-row"><button class="btn" onclick="closeModal('tmplModal')">Cancel</button><button class="btn btn-accent" onclick="execTmpl()">Run</button></div>
 </div></div>
 
-<div id="toast-box"></div>
+<div id="toast-box" aria-live="polite"></div>
 
 <script>
-/* === State === */
-let ws=null,running=false,cost=0,selTmpl=null,recognition=null,voiceOn=false,logsVisible=true;
+/* ============== state ============== */
+let ws=null, running=false, selTmpl=null, recognition=null, voiceOn=false;
+let browserControlMode='takeover', currentBrowser='built-in', previewTimer=null;
+let palActive=0, palItems=[], tmplStore={};
+let activeClientRunId=null, activeTaskId=null;
 
-/* === Toast === */
-function toast(m,t='info'){const c=document.getElementById('toast-box'),d=document.createElement('div');d.className='toast toast-'+t;d.textContent=m;c.appendChild(d);setTimeout(()=>{d.style.opacity='0';setTimeout(()=>d.remove(),200)},3500)}
+/* ============== util ============== */
+function $(id){return document.getElementById(id)}
+function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML}
+function toast(m,t){const c=$('toast-box'),d=document.createElement('div');d.className='toast toast-'+(t||'info');d.textContent=m;c.appendChild(d);setTimeout(()=>{d.style.opacity='0';setTimeout(()=>d.remove(),200)},3500)}
+function clearToasts(){const c=$('toast-box'); if(c)c.innerHTML=''}
 
-/* === Theme === */
-function toggleTheme(){const h=document.documentElement,d=h.dataset.theme==='dark';h.dataset.theme=d?'light':'dark';localStorage.setItem('t',d?'light':'dark');document.getElementById('themeBtn').textContent=d?'Dark':'Light'}
-(function(){const s=localStorage.getItem('t')||'dark';document.documentElement.dataset.theme=s;const b=document.getElementById('themeBtn');if(b)b.textContent=s==='dark'?'Light':'Dark'})();
+/* ============== theme ============== */
+function toggleTheme(){
+  const h=document.documentElement;
+  const dark=h.dataset.theme==='dark';
+  h.dataset.theme=dark?'light':'dark';
+  localStorage.setItem('t', h.dataset.theme);
+}
+(function(){
+  const s=localStorage.getItem('t')||'dark';
+  document.documentElement.dataset.theme=s;
+})();
 
-/* === Tabs === */
-document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>{
-  document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
-  b.classList.add('active');document.getElementById('p-'+b.dataset.t).classList.add('active');
+/* ============== inspector ============== */
+function toggleInspector(){
+  document.body.classList.toggle('inspector-closed');
+  localStorage.setItem('insp', document.body.classList.contains('inspector-closed')?'0':'1');
+}
+(function(){
+  // closed by default, open only if the user explicitly opened it last time
+  const s=localStorage.getItem('insp');
+  if(s!=='1')document.body.classList.add('inspector-closed');
+})();
+
+document.querySelectorAll('.inspector-tab').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.inspector-tab').forEach(x=>{x.classList.remove('active');x.setAttribute('aria-selected','false')});
+  document.querySelectorAll('.ipanel').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');b.setAttribute('aria-selected','true');
   const t=b.dataset.t;
-  if(t==='templates')loadTmpls();else if(t==='history')loadHist();else if(t==='recordings')loadRecs();
-  else if(t==='workflows')loadWfs();else if(t==='scheduled')loadScheds();else if(t==='analytics')loadStats();
+  const panel=$('ip-'+t);
+  if(panel)panel.classList.add('active');
+  if(t==='templates')loadTmpls();
+  else if(t==='history')loadHist();
+  else if(t==='recordings')loadRecs();
+  else if(t==='workflows')loadWfs();
+  else if(t==='scheduled')loadScheds();
+  else if(t==='analytics')loadStats();
+  else if(t==='provider')loadProviders();
 }));
 
-/* === Logs toggle === */
-function toggleLogs(){
-  const box=document.getElementById('logBox'),tog=document.getElementById('logToggle');
-  logsVisible=!logsVisible;
-  box.classList.toggle('collapsed',!logsVisible);
-  tog.textContent=logsVisible?'Hide':'Show';
+function focusInspectorTab(name){
+  const btn=document.querySelector('.inspector-tab[data-t="'+name+'"]');
+  if(btn){if(document.body.classList.contains('inspector-closed'))toggleInspector();btn.click()}
 }
 
-/* === Clear === */
-function clearAll(){
-  document.getElementById('logBox').innerHTML='<div class="log-line ok"><span class="ts">--:--:--</span>System ready</div>';
-  document.getElementById('filmstrip').innerHTML='';
-  document.getElementById('prevImg').src='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-  document.getElementById('prevBadge').textContent='No preview';
-  document.getElementById('progFill').style.width='0%';
-  document.getElementById('taskInput').value='';
-  cost=0;document.getElementById('costPill').textContent='0 tok';
-  setStatus('Ready',false);
-  resetUI();
+/* ============== preview ============== */
+function setPreviewEmpty(on){const e=$('previewEmpty');if(e)e.style.display=on?'flex':'none'}
+function resetPreview(){
+  $('prevImg').src='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  $('prevBadge').textContent='no preview';
+  setPreviewEmpty(true);
 }
 
-/* === WebSocket === */
+function applyScreenOnly(on){
+  document.body.classList.toggle('screen-only', on);
+  const txt=$('screenOnlyText'), btn=$('screenOnlyBtn');
+  if(txt)txt.textContent=on?'Exit':'Screen';
+  if(btn)btn.classList.toggle('screen-active', on);
+}
+async function toggleScreenOnly(){
+  const on=!document.body.classList.contains('screen-only');
+  applyScreenOnly(on);
+  try{
+    if(on && !document.fullscreenElement){
+      await document.documentElement.requestFullscreen();
+    } else if(!on && document.fullscreenElement){
+      await document.exitFullscreen();
+    }
+  }catch(e){
+    if(on)toast('Use the browser fullscreen shortcut if fullscreen is blocked','warn');
+  }
+}
+
+function setProviderVisual(kind,text){
+  const tag=$('aiTag');
+  const sep=$('aiSep');
+  const provider=$('providerState');
+  if(tag){
+    tag.classList.remove('ready','running');
+    tag.hidden=true;
+    tag.textContent='';
+    if(sep)sep.hidden=true;
+  }
+  if(provider)provider.textContent=text;
+}
+
+/* ============== logs ============== */
+function logGlyph(cls){
+  if(cls==='ok')return '✓';
+  if(cls==='err')return '×';
+  return '·';
+}
+function log(m,cls){
+  const b=$('logBox'),d=document.createElement('div');
+  d.className='log-line '+(cls||'');
+  const ts='<time>'+new Date().toLocaleTimeString([], {hour12:false})+'</time>';
+  const glyph='<span class="log-glyph">'+logGlyph(cls)+'</span>';
+  if(cls==='err' && m && m.includes('System not ready')){
+    d.innerHTML=ts+glyph+'<span class="log-msg"><span class="log-title">System not ready</span><span class="log-body">Configure Groq, Gemini, or Ollama before running a task.</span></span>';
+  } else {
+    d.innerHTML=ts+glyph+'<span class="log-msg">'+esc(m)+'</span>';
+  }
+  b.appendChild(d);b.scrollTop=b.scrollHeight;
+}
+function logThink(t){
+  const b=$('logBox'),d=document.createElement('details');
+  d.className='log-line think';
+  const ts=new Date().toLocaleTimeString([], {hour12:false});
+  d.innerHTML='<summary><time>'+ts+'</time><span class="log-glyph">›</span><span class="log-msg">AI reasoning</span></summary><pre>'+esc(t)+'</pre>';
+  b.appendChild(d);b.scrollTop=b.scrollHeight;
+}
+function addFrame(b64,step){
+  const s=$('filmstrip'),i=document.createElement('img');
+  i.src='data:image/jpeg;base64,'+b64;i.title='Step '+step;
+  i.onclick=()=>{setPreviewEmpty(false);$('prevImg').src=i.src};
+  s.appendChild(i);
+  while(s.childElementCount>30)s.removeChild(s.firstChild);
+  s.scrollLeft=s.scrollWidth;
+}
+
+/* ============== state ui ============== */
+function setStatus(t){
+  const top=$('topStatusText'); if(top)top.textContent=t;
+  const lbl=$('statusLabel'); if(lbl)lbl.textContent=t;
+}
+function setDockStatus(t){
+  const d=$('dockStatus');
+  if(!t){d.hidden=true;return}
+  d.hidden=false;
+  d.querySelector('.dock-status-text').textContent=t;
+}
+function updTokens(t){
+  const pill=$('costPill');
+  if(pill)pill.textContent=(t>=1000?(t/1000).toFixed(1)+'k':t)+' tok';
+}
+function setTask(t){$('taskInput').value=t;$('taskInput').focus()}
+function resetUI(){
+  running=false;
+  const run=$('runBtn'), stop=$('stopBtn');
+  run.disabled=false; run.hidden=false;
+  stop.disabled=true; stop.hidden=true;
+  $('progFill').style.width='0%';
+  setDockStatus(null);
+  setStatus('Ready');
+  loadProviders();
+}
+
+/* ============== terminal blocker / validation ============== */
+function showTerminalBlocker(d){
+  const status=(d.status||'failed');
+  const label=status==='blocked'?'Blocked':status==='unverified'?'Unverified':'Failed';
+  const bt=d.blocker_type?(' ['+d.blocker_type+']'):'';
+  const msg=d.blocker_message||d.error||'Task did not complete';
+  log(label+bt+': '+msg, status==='unverified'?'':'err');
+  if(d.suggested_next_step)log('next: '+d.suggested_next_step,'');
+  if(d.visible_evidence)log('evidence: '+d.visible_evidence,'');
+  if(d.current_url)log('at: '+d.current_url,'');
+  toast(label+': '+msg, status==='unverified'?'warn':'err');
+}
+
+/* ============== ws ============== */
 function connectWS(){
   const p=location.protocol==='https:'?'wss:':'ws:';
   ws=new WebSocket(p+'//'+location.host+'/ws/advanced');
-  ws.onopen=()=>{document.getElementById('connDot').className='dot'};
-  ws.onclose=()=>{document.getElementById('connDot').className='dot off';setTimeout(connectWS,3000)};
+  ws.onopen=()=>{const dot=$('connDot');if(dot)dot.classList.remove('off');setStatus('idle')};
+  ws.onclose=()=>{const dot=$('connDot');if(dot)dot.classList.add('off');setStatus('reconnecting');setTimeout(connectWS,3000)};
   ws.onerror=()=>{};
   ws.onmessage=e=>{try{handle(JSON.parse(e.data))}catch(err){console.error('WS parse error',err)}};
 }
 function handle(d){
+  if(d.client_run_id && activeClientRunId && d.client_run_id!==activeClientRunId)return;
+  if(d.task_id && activeTaskId && d.task_id!==activeTaskId)return;
+  if(d.task_id && (d.type==='task_queued'||d.type==='task_started'))activeTaskId=d.task_id;
   switch(d.type){
-    case 'task_queued':log('Queued - waiting for browser','');setStatus('Queued...',true);break;
-    case 'task_started':log('Task started','ok');setStatus('Running...',true);break;
+    case 'task_queued':
+      log('Queued, waiting for browser','');setStatus('queued');setDockStatus('queued, waiting for browser');break;
+    case 'task_started':
+      log('Task started','ok');setStatus('running');setDockStatus('running…');
+      setProviderVisual('running',$('aiTag').textContent||'running');break;
     case 'planning_complete':
-      log('Planned '+d.plans_created+' action(s), '+Math.round((d.confidence||0)*100)+'% confidence','ok');
+      log('Planned '+d.plans_created+' action(s) at '+Math.round((d.confidence||0)*100)+'% confidence','ok');
       if(d.thinking)logThink(d.thinking);
-      if(d.groq_stats&&typeof d.groq_stats.total_tokens==='number')updTokens(d.groq_stats.total_tokens);break;
+      if(d.groq_stats && typeof d.groq_stats.total_tokens==='number')updTokens(d.groq_stats.total_tokens);
+      break;
     case 'step_started':
-      document.getElementById('progFill').style.width=((d.step/d.max_steps)*100)+'%';
-      setStatus('Step '+d.step+'/'+d.max_steps,true);break;
+      $('progFill').style.width=((d.step/d.max_steps)*100)+'%';
+      setStatus('step '+d.step+'/'+d.max_steps);
+      setDockStatus('step '+d.step+' of '+d.max_steps);
+      break;
     case 'step_executed':
-      log(d.action+': '+(d.success?'ok':'FAILED')+(d.error?' - '+d.error:''),d.success?'ok':'err');
+      log(d.action+': '+(d.success?'ok':'FAILED')+(d.error?': '+d.error:''), d.success?'ok':'err');
+      setDockStatus((d.success?'→ ':'× ')+d.action);
       if(d.thinking)logThink(d.thinking);
-      if(d.screenshot){document.getElementById('prevImg').src='data:image/jpeg;base64,'+d.screenshot;document.getElementById('prevBadge').textContent='Step '+(d.step||'');addFrame(d.screenshot,d.step)}
-      if(d.diff&&d.diff.changed)log('Page: '+d.diff.diff_summary,'');break;
-    case 'completion_check':if(d.completed)log('Task complete: '+d.summary,'ok');break;
-    case 'recovery_success':log('Recovered: '+d.reasoning,'ok');break;
-    case 'warning':log(d.message,'err');toast(d.message,'warn');break;
+      if(d.screenshot){
+        setPreviewEmpty(false);
+        $('prevImg').src='data:image/jpeg;base64,'+d.screenshot;
+        $('prevBadge').textContent='step '+(d.step||'');
+        addFrame(d.screenshot,d.step);
+      }
+      if(d.diff && d.diff.changed)log('page: '+d.diff.diff_summary,'');
+      break;
+    case 'completion_check':
+      if(d.completed)log('Task complete: '+d.summary,'ok');
+      break;
+    case 'recovery_success':
+      log('Recovered: '+d.reasoning,'ok');break;
+    case 'warning':
+      log(d.message,'err');toast(d.message,'warn');break;
     case 'task_completed':
-      log('Done - '+d.steps_taken+' steps, '+Math.round(d.execution_time)+'s','ok');
+      log('Done in '+d.steps_taken+' steps, '+Math.round(d.execution_time)+'s','ok');
       if(d.result_summary)log(d.result_summary,'ok');
-      if(d.groq_stats&&typeof d.groq_stats.total_tokens==='number')updTokens(d.groq_stats.total_tokens);
-      resetUI();toast('Task completed','ok');break;
-    case 'task_failed':log('Failed: '+d.error,'err');resetUI();toast(d.error||'Task failed','err');break;
-    case 'task_cancelled':log('Cancelled','');resetUI();break;
+      if(d.validation && (d.validation.reason||d.validation.success_condition))
+        log('verified'+(d.validation.validation_method?' ('+d.validation.validation_method+')':'')+': '+(d.validation.reason||d.validation.success_condition),'ok');
+      if(d.groq_stats && typeof d.groq_stats.total_tokens==='number')updTokens(d.groq_stats.total_tokens);
+      resetUI();
+      setDockStatus(d.result_summary||'completed');
+      setStatus('Ready');
+      takeScreenshot(true);
+      break;
+    case 'task_failed':
+      showTerminalBlocker(d);
+      resetUI();
+      break;
+    case 'task_cancelled':
+      log('Cancelled','');resetUI();break;
   }
 }
 
-/* === Logging === */
-function log(m,cls){const b=document.getElementById('logBox'),d=document.createElement('div');d.className='log-line '+(cls||'');d.innerHTML='<span class="ts">'+new Date().toLocaleTimeString()+'</span>'+esc(m);b.appendChild(d);b.scrollTop=b.scrollHeight}
-function logThink(t){const b=document.getElementById('logBox'),d=document.createElement('details');d.className='log-line think';d.innerHTML='<summary>AI reasoning</summary><pre style="white-space:pre-wrap;margin-top:4px;font-size:12px;color:var(--text-1)">'+esc(t)+'</pre>';b.appendChild(d);b.scrollTop=b.scrollHeight}
-function addFrame(b64,step){const s=document.getElementById('filmstrip'),i=document.createElement('img');i.src='data:image/jpeg;base64,'+b64;i.title='Step '+step;i.onclick=()=>{document.getElementById('prevImg').src=i.src};s.appendChild(i);while(s.childElementCount>30)s.removeChild(s.firstChild);s.scrollLeft=s.scrollWidth}
-function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
-
-/* === UI state === */
-function setStatus(t){document.getElementById('statusLabel').textContent=t}
-function updCost(c){cost=c;document.getElementById('costPill').textContent='$'+c.toFixed(4)}
-function updTokens(t){document.getElementById('costPill').textContent=(t>=1000?(t/1000).toFixed(1)+'k':t)+' tok'}
-function setTask(t){document.getElementById('taskInput').value=t}
-function resetUI(){running=false;document.getElementById('runBtn').disabled=false;document.getElementById('stopBtn').disabled=true;document.getElementById('progFill').style.width='0%';setStatus('Ready')}
-
-/* === Execute === */
+/* ============== task control ============== */
 function runTask(){
-  const t=document.getElementById('taskInput').value.trim();
+  const t=$('taskInput').value.trim();
   if(!t){toast('Enter a task','err');return}
-  if(!ws||ws.readyState!==1){toast('Connecting...','warn');connectWS();return}
-  document.getElementById('logBox').innerHTML='';document.getElementById('filmstrip').innerHTML='';
-  running=true;document.getElementById('runBtn').disabled=true;document.getElementById('stopBtn').disabled=false;
-  ws.send(JSON.stringify({type:'execute_advanced_task',description:t,options:{max_steps:25,confidence_threshold:0.6}}));
+  if(!ws||ws.readyState!==1){toast('Connecting…','warn');connectWS();return}
+  activeClientRunId=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now())+'-'+Math.random().toString(16).slice(2);
+  activeTaskId=null;
+  clearToasts();
+  $('logBox').innerHTML='';
+  $('filmstrip').innerHTML='';
+  resetPreview();
+  $('prevBadge').textContent='running';
+  setDockStatus(null);
+  running=true;
+  const run=$('runBtn'), stop=$('stopBtn');
+  run.disabled=true; run.hidden=true;
+  stop.disabled=false; stop.hidden=false;
+  ws.send(JSON.stringify({
+    type:'execute_advanced_task',
+    client_run_id:activeClientRunId,
+    description:t,
+    options:{confidence_threshold:0.6}
+  }));
 }
 function stopTask(){
-  if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'stop_task'}));
+  if(ws && ws.readyState===1) ws.send(JSON.stringify({type:'stop_task',client_run_id:activeClientRunId}));
   resetUI();
   log('Stop requested','');
 }
-
-/* === Screenshot === */
-async function takeScreenshot(){try{const r=await fetch('/api/screenshot');const d=await r.json();if(d.screenshot){document.getElementById('prevImg').src='data:image/jpeg;base64,'+d.screenshot;toast('Captured','ok')}}catch(e){toast('Failed','err')}}
-
-/* === Extract === */
-async function extractData(){try{const r=await fetch('/api/extract?format=json');const d=await r.json();log('Extracted '+(d.tables||[]).length+' tables, '+(d.links||[]).length+' links','ok');toast('Data extracted - check console','ok');console.log(d);const cr=await fetch('/api/extract?format=csv');const csv=await cr.text();const b=new Blob([csv],{type:'text/csv'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download='data.csv';a.click()}catch(e){toast('Extraction failed','err')}}
-
-/* === Voice === */
-function toggleVoice(){
-  if(!('webkitSpeechRecognition' in window||'SpeechRecognition' in window)){toast('Speech not supported in this browser','err');return}
-  const b=document.getElementById('voiceBtn');
-  if(voiceOn){recognition.stop();b.classList.remove('on');b.textContent='Mic';voiceOn=false;return}
-  const S=window.SpeechRecognition||window.webkitSpeechRecognition;recognition=new S();recognition.continuous=false;recognition.lang='en-US';
-  recognition.onresult=e=>{document.getElementById('taskInput').value=e.results[0][0].transcript;toast('Voice captured','ok')};
-  recognition.onend=()=>{b.classList.remove('on');b.textContent='Mic';voiceOn=false};
-  recognition.start();b.classList.add('on');b.textContent='Listening...';voiceOn=true;
+function clearAll(){
+  $('logBox').innerHTML='';
+  $('filmstrip').innerHTML='';
+  resetPreview();
+  $('progFill').style.width='0%';
+  $('taskInput').value='';
+  const pill=$('costPill');
+  if(pill)pill.textContent='0 tok';
+  setStatus('Ready');
+  setDockStatus(null);
+  resetUI();
 }
 
-/* === Templates === */
-async function loadTmpls(){try{const r=await fetch('/api/templates');const ts=await r.json();const g=document.getElementById('tmplGrid');g.innerHTML=ts.map(t=>`<div class="tmpl-card"><div class="tmpl-name">${esc(t.name)}</div><div class="tmpl-desc">${esc(t.description)}</div><div class="row" style="justify-content:space-between"><span class="tmpl-tag">${esc(t.category)}</span><button class="btn btn-sm" onclick="showTmpl(${t.id},'${esc(t.name)}','${t.variables||"[]"}')">Run</button></div></div>`).join('')}catch(e){}}
-function showTmpl(id,name,vars){selTmpl=id;document.getElementById('tmplModalTitle').textContent=name;const v=JSON.parse(vars),c=document.getElementById('tmplVars');c.innerHTML=v.map(x=>`<label>${esc(x)}</label><input class="input" id="tv_${x}" placeholder="${esc(x)}">`).join('');openModal('tmplModal')}
-async function execTmpl(){const inputs=document.querySelectorAll('#tmplVars input'),vars={};inputs.forEach(i=>{vars[i.id.replace('tv_','')]=i.value});closeModal('tmplModal');toast('Running template...','info');try{await fetch('/api/templates/'+selTmpl+'/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({variables:vars})});toast('Template done','ok')}catch(e){toast('Failed','err')}}
+/* ============== screenshot / extract ============== */
+async function takeScreenshot(silent=false){
+  try{
+    const r=await fetch('/api/screenshot');
+    if(!r.ok){
+      if(!silent)toast('Capture failed','err');
+      return false;
+    }
+    const d=await r.json();
+    if(d.screenshot){
+      setPreviewEmpty(false);
+      $('prevImg').src='data:image/jpeg;base64,'+d.screenshot;
+      if(!silent)$('prevBadge').textContent='captured';
+      if(!silent)toast('Captured','ok');
+      return true;
+    }
+  }catch(e){if(!silent)toast('Capture failed','err')}
+  return false;
+}
+async function extractData(){
+  try{
+    const r=await fetch('/api/extract?format=json');
+    const d=await r.json();
+    log('Extracted '+((d.tables||[]).length)+' tables, '+((d.links||[]).length)+' links','ok');
+    toast('Data extracted. Check console + downloaded CSV','ok');
+    console.log(d);
+    const cr=await fetch('/api/extract?format=csv');
+    const csv=await cr.text();
+    const b=new Blob([csv],{type:'text/csv'});
+    const u=URL.createObjectURL(b);
+    const a=document.createElement('a');a.href=u;a.download='data.csv';a.click();
+  }catch(e){toast('Extraction failed','err')}
+}
 
-/* === History === */
-async function loadHist(){try{const r=await fetch('/api/tasks/history');const ts=await r.json();document.getElementById('histBody').innerHTML=ts.map(t=>`<tr><td>${t.created_at?new Date(t.created_at).toLocaleString():'-'}</td><td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.description||'-')}</td><td><span class="badge ${t.status==='completed'?'badge-ok':'badge-err'}">${t.status||'-'}</span></td><td>${t.steps_taken||0}</td><td>$${(t.total_cost||0).toFixed(4)}</td><td>${t.execution_time?Math.round(t.execution_time)+'s':'-'}</td></tr>`).join('')}catch(e){}}
+/* ============== voice (honest) ============== */
+function voiceSupported(){
+  return ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window);
+}
+function initVoice(){
+  const btn=$('voiceBtn');
+  btn.hidden=false;
+  btn.title=voiceSupported()?'Voice input':'Voice input not supported in this browser';
+}
+async function toggleVoice(){
+  const btn=$('voiceBtn');
+  if(!voiceSupported()){
+    toast('Voice input not supported in this browser','err');
+    return;
+  }
+  if(voiceOn){
+    try{recognition && recognition.stop()}catch(_){}
+    btn.classList.remove('on');btn.title='Voice input';voiceOn=false;
+    return;
+  }
+  const S=window.SpeechRecognition || window.webkitSpeechRecognition;
+  let finalText='', heardVoice=false;
+  recognition=new S();
+  recognition.continuous=false;
+  recognition.interimResults=true;
+  recognition.lang='en-US';
+  recognition.onresult=e=>{
+    let interim='';
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      const txt=e.results[i][0].transcript;
+      if(e.results[i].isFinal)finalText+=txt;
+      else interim+=txt;
+    }
+    const text=(finalText||interim).trim();
+    if(text){
+      heardVoice=true;
+      $('taskInput').value=text;
+      $('taskInput').dispatchEvent(new Event('input'));
+    }
+  };
+  recognition.onerror=e=>{
+    const err=e.error||'unknown';
+    const msg=err==='not-allowed'?'Microphone permission denied':'Voice input failed: '+err;
+    toast(msg,'err');
+    btn.classList.remove('on');btn.title='Voice input';voiceOn=false;
+  };
+  recognition.onend=()=>{
+    if(heardVoice)toast('Voice captured','ok');
+    btn.classList.remove('on');btn.title='Voice input';voiceOn=false;
+  };
+  try{
+    recognition.start();
+    voiceOn=true;
+    btn.classList.add('on');
+    btn.title='Listening, click to stop';
+  }catch(e){
+    toast('Could not start voice: '+(e.message||e),'err');
+    btn.classList.remove('on');btn.title='Voice input';
+  }
+}
 
-/* === Recordings === */
-async function loadRecs(){try{const r=await fetch('/api/recordings');const rs=await r.json();const c=document.getElementById('recList');if(!rs.length){c.innerHTML='<div class="empty">No recordings yet. Run a task to create one.</div>';return}c.innerHTML=rs.map(r=>`<div class="list-item"><div class="list-item-info"><div class="list-item-name">${esc(r.name||'Recording')}</div><div class="list-item-sub">${r.created_at||''}</div></div><div class="list-item-actions"><a href="/api/recordings/${r.id}/export?format=python" class="btn btn-sm" download>Python</a><a href="/api/recordings/${r.id}/export?format=json" class="btn btn-sm" download>JSON</a></div></div>`).join('')}catch(e){}}
+/* ============== templates / history / etc ============== */
+async function loadTmpls(){
+  try{
+    const r=await fetch('/api/templates');const ts=await r.json();
+    const g=$('tmplGrid');
+    tmplStore={};
+    ts.forEach(t=>{tmplStore[t.id]=t});
+    if(!ts.length){g.innerHTML='<div class="empty">No templates yet.</div>';return}
+    g.innerHTML=ts.map(t=>`
+      <div class="tmpl-card">
+        <div class="tmpl-name">${esc(t.name)}</div>
+        <div class="tmpl-desc">${esc(t.description)}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span class="tmpl-tag">${esc(t.category)}</span>
+          <button class="btn-quiet" onclick="showTmpl(${t.id})">Run</button>
+        </div>
+      </div>`).join('');
+  }catch(e){}
+}
+function parseTmplVars(raw){
+  if(Array.isArray(raw))return raw;
+  try{return JSON.parse(raw||'[]')}catch(_){return []}
+}
+function normTmplVar(v){
+  if(typeof v==='string')return {name:v,label:v,placeholder:v,type:v==='instructions'?'textarea':'text'};
+  return {
+    name:v.name||v.key||'value',
+    label:v.label||v.name||v.key||'Value',
+    placeholder:v.placeholder||v.label||v.name||v.key||'',
+    type:v.type||((v.name||v.key)==='instructions'?'textarea':'text')
+  };
+}
+function showTmpl(id){
+  const t=tmplStore[id];
+  if(!t){toast('Template missing','err');return}
+  selTmpl=id;
+  $('tmplModalTitle').textContent=t.name||'Run template';
+  $('tmplModalDesc').textContent=t.description||'';
+  const vars=parseTmplVars(t.variables).map(normTmplVar), c=$('tmplVars');
+  if(!vars.length){
+    c.innerHTML='<div class="empty">No inputs needed.</div>';
+  } else {
+    c.innerHTML=vars.map(v=>{
+      const field=v.type==='textarea'
+        ? `<textarea class="input tmpl-var" data-var="${esc(v.name)}" rows="4" placeholder="${esc(v.placeholder)}"></textarea>`
+        : `<input class="input tmpl-var" data-var="${esc(v.name)}" placeholder="${esc(v.placeholder)}">`;
+      return `<label>${esc(v.label)}</label>${field}`;
+    }).join('');
+  }
+  openModal('tmplModal');
+}
+async function execTmpl(){
+  if(!selTmpl){toast('Choose a template','err');return}
+  if(!ws||ws.readyState!==1){toast('Connecting…','warn');connectWS();return}
+  if(running){toast('A task is already running','warn');return}
+  const inputs=document.querySelectorAll('#tmplVars .tmpl-var'),vars={};
+  for(const i of inputs){
+    const key=i.dataset.var;
+    const val=i.value.trim();
+    if(!val){toast('Fill '+key,'err');i.focus();return}
+    vars[key]=val;
+  }
+  closeModal('tmplModal');
+  $('logBox').innerHTML='';
+  $('filmstrip').innerHTML='';
+  running=true;
+  const run=$('runBtn'), stop=$('stopBtn');
+  run.disabled=true; run.hidden=true;
+  stop.disabled=false; stop.hidden=false;
+  $('progFill').style.width='0%';
+  toast('Running template…','info');
+  ws.send(JSON.stringify({type:'execute_template',template_id:selTmpl,variables:vars}));
+}
 
-/* === Workflows === */
-async function loadWfs(){try{const r=await fetch('/api/workflows');const ws=await r.json();const c=document.getElementById('wfList');if(!ws.length){c.innerHTML='<div class="empty">No workflows yet.</div>';return}c.innerHTML=ws.map(w=>`<div class="list-item"><div class="list-item-info"><div class="list-item-name">${esc(w.name)}</div><div class="list-item-sub">${esc(w.description||'')}</div></div><button class="btn btn-sm" onclick="runWf('${w.id}')">Run</button></div>`).join('')}catch(e){}}
-async function createWf(){const n=document.getElementById('wfName').value.trim(),d=document.getElementById('wfDescI').value.trim(),s=document.getElementById('wfSteps').value.trim();if(!n||!s){toast('Fill fields','err');return}const steps=s.split('\n').filter(x=>x.trim()).map((x,i)=>({order:i+1,name:'Step '+(i+1),task_description:x.trim(),on_failure:'stop'}));try{await fetch('/api/workflows',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,description:d,steps})});closeModal('wfModal');toast('Workflow created','ok');loadWfs()}catch(e){toast('Failed','err')}}
-async function runWf(id){toast('Running workflow...','info');try{await fetch('/api/workflows/'+id+'/execute',{method:'POST'});toast('Workflow done','ok')}catch(e){toast('Failed','err')}}
+async function loadHist(){
+  try{
+    const r=await fetch('/api/tasks/history');const ts=await r.json();
+    $('histBody').innerHTML=ts.map(t=>`
+      <tr>
+        <td>${t.created_at?new Date(t.created_at).toLocaleString():'-'}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.description||'-')}</td>
+        <td><span class="badge ${t.status==='completed'?'badge-ok':'badge-err'}">${t.status||'-'}</span></td>
+        <td>${t.steps_taken||0}</td>
+        <td>$${(t.total_cost||0).toFixed(4)}</td>
+        <td>${t.execution_time?Math.round(t.execution_time)+'s':'-'}</td>
+      </tr>`).join('');
+  }catch(e){}
+}
 
-/* === Scheduled === */
-async function loadScheds(){try{const r=await fetch('/api/scheduled');const ts=await r.json();const c=document.getElementById('schedList');if(!ts.length){c.innerHTML='<div class="empty">No scheduled tasks.</div>';return}c.innerHTML=ts.map(t=>`<div class="list-item"><div class="list-item-info"><div class="list-item-name">${esc(t.name)}</div><div class="list-item-sub">${esc(t.description)} · Every ${t.cron_expression} · Runs: ${t.run_count||0}</div></div><div class="list-item-actions"><button class="btn btn-sm" onclick="toggleSched('${t.id}',${!t.enabled})">${t.enabled?'Pause':'Resume'}</button><button class="btn btn-sm btn-danger" onclick="delSched('${t.id}')">Delete</button></div></div>`).join('')}catch(e){}}
-async function createSched(){const n=document.getElementById('sName').value.trim(),d=document.getElementById('sDesc').value.trim(),i=document.getElementById('sInt').value.trim();if(!n||!d||!i){toast('Fill all fields','err');return}try{const r=await fetch('/api/scheduled',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,description:d,interval:i})});const data=await r.json();if(data.error){toast(data.error,'err');return}closeModal('schedModal');toast('Task scheduled','ok');loadScheds()}catch(e){toast('Failed','err')}}
+async function loadRecs(){
+  try{
+    const r=await fetch('/api/recordings');const rs=await r.json();
+    const c=$('recList');
+    if(!rs.length){c.innerHTML='<div class="empty">No recordings yet. Run a task to create one.</div>';return}
+    c.innerHTML=rs.map(r=>`
+      <div class="list-item">
+        <div class="list-item-info">
+          <div class="list-item-name">${esc(r.name||'Recording')}</div>
+          <div class="list-item-sub">${esc(r.created_at||'')}</div>
+        </div>
+        <div class="list-item-actions">
+          <a href="/api/recordings/${r.id}/export?format=python" class="btn-quiet" download>Python</a>
+          <a href="/api/recordings/${r.id}/export?format=json" class="btn-quiet" download>JSON</a>
+        </div>
+      </div>`).join('');
+  }catch(e){}
+}
+
+async function loadWfs(){
+  try{
+    const r=await fetch('/api/workflows');const wfs=await r.json();
+    const c=$('wfList');
+    if(!wfs.length){c.innerHTML='<div class="empty">No workflows yet.</div>';return}
+    c.innerHTML=wfs.map(w=>`
+      <div class="list-item">
+        <div class="list-item-info">
+          <div class="list-item-name">${esc(w.name)}</div>
+          <div class="list-item-sub">${esc(w.description||'')}</div>
+        </div>
+        <button class="btn-quiet" onclick="runWf('${w.id}')">Run</button>
+      </div>`).join('');
+  }catch(e){}
+}
+async function createWf(){
+  const n=$('wfName').value.trim(), d=$('wfDescI').value.trim(), s=$('wfSteps').value.trim();
+  if(!n||!s){toast('Fill name + steps','err');return}
+  const steps=s.split('\n').filter(x=>x.trim()).map((x,i)=>({order:i+1,name:'Step '+(i+1),task_description:x.trim(),on_failure:'stop'}));
+  try{
+    await fetch('/api/workflows',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,description:d,steps})});
+    closeModal('wfModal');toast('Workflow created','ok');loadWfs();
+  }catch(e){toast('Failed','err')}
+}
+async function runWf(id){
+  toast('Running workflow…','info');
+  try{await fetch('/api/workflows/'+id+'/execute',{method:'POST'});toast('Workflow done','ok')}catch(e){toast('Failed','err')}
+}
+
+async function loadScheds(){
+  try{
+    const r=await fetch('/api/scheduled');const ts=await r.json();
+    const c=$('schedList');
+    if(!ts.length){c.innerHTML='<div class="empty">No scheduled tasks.</div>';return}
+    c.innerHTML=ts.map(t=>`
+      <div class="list-item">
+        <div class="list-item-info">
+          <div class="list-item-name">${esc(t.name)}</div>
+          <div class="list-item-sub">${esc(t.description)} · every ${t.cron_expression} · runs ${t.run_count||0}</div>
+        </div>
+        <div class="list-item-actions">
+          <button class="btn-quiet" onclick="toggleSched('${t.id}',${!t.enabled})">${t.enabled?'Pause':'Resume'}</button>
+          <button class="btn-quiet btn-danger" onclick="delSched('${t.id}')">Delete</button>
+        </div>
+      </div>`).join('');
+  }catch(e){}
+}
+async function createSched(){
+  const n=$('sName').value.trim(), d=$('sDesc').value.trim(), i=$('sInt').value.trim();
+  if(!n||!d||!i){toast('Fill all fields','err');return}
+  try{
+    const r=await fetch('/api/scheduled',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,description:d,interval:i})});
+    const data=await r.json();
+    if(data.error){toast(data.error,'err');return}
+    closeModal('schedModal');toast('Task scheduled','ok');loadScheds();
+  }catch(e){toast('Failed','err')}
+}
 async function toggleSched(id,en){await fetch('/api/scheduled/'+id+'/toggle?enabled='+en,{method:'POST'});loadScheds()}
 async function delSched(id){await fetch('/api/scheduled/'+id,{method:'DELETE'});loadScheds()}
 
-/* === Analytics === */
-async function loadStats(){try{const r=await fetch('/api/analytics');const d=await r.json();document.getElementById('statRow').innerHTML=`<div class="stat"><div class="stat-val">${d.total_tasks}</div><div class="stat-lbl">Tasks</div></div><div class="stat"><div class="stat-val">${d.success_rate}%</div><div class="stat-lbl">Success</div></div><div class="stat"><div class="stat-val">${d.avg_steps}</div><div class="stat-lbl">Avg Steps</div></div><div class="stat"><div class="stat-val">${d.avg_execution_time}s</div><div class="stat-lbl">Avg Time</div></div><div class="stat"><div class="stat-val">$${d.total_cost}</div><div class="stat-lbl">Total Cost</div></div>`}catch(e){}}
+async function loadStats(){
+  try{
+    const r=await fetch('/api/analytics');const d=await r.json();
+    $('statRow').innerHTML=`
+      <div class="stat"><div class="stat-val">${d.total_tasks}</div><div class="stat-lbl">Tasks</div></div>
+      <div class="stat"><div class="stat-val">${d.success_rate}%</div><div class="stat-lbl">Success</div></div>
+      <div class="stat"><div class="stat-val">${d.avg_steps}</div><div class="stat-lbl">Avg steps</div></div>
+      <div class="stat"><div class="stat-val">${d.avg_execution_time}s</div><div class="stat-lbl">Avg time</div></div>
+      <div class="stat" style="grid-column:1/-1"><div class="stat-val">$${d.total_cost}</div><div class="stat-lbl">Total cost</div></div>`;
+  }catch(e){}
+}
 
-/* === Modals === */
-function openModal(id){document.getElementById(id).classList.add('on')}
-function closeModal(id){document.getElementById(id).classList.remove('on')}
+/* ============== modals ============== */
+function openModal(id){$(id).classList.add('on')}
+function closeModal(id){$(id).classList.remove('on')}
 document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('on')}));
 
-/* === Keys === */
-document.addEventListener('keydown',e=>{
-  if(e.ctrlKey&&e.key==='Enter'){e.preventDefault();runTask()}
-  else if(e.key==='Escape'){if(running)stopTask()}
-  else if(e.ctrlKey&&e.key==='d'){e.preventDefault();toggleTheme()}
-  else if(e.ctrlKey&&e.key==='l'){e.preventDefault();toggleLogs()}
-});
-
-/* === Browser Selection === */
+/* ============== browser switch ============== */
 async function loadBrowsers(){
   try{
     const r=await fetch('/api/browser/status');const d=await r.json();
-    const sel=document.getElementById('browserSelect');
-    const lbl=document.getElementById('browserLabel');
-    lbl.textContent=d.current==='built-in'?'Built-in':d.current.charAt(0).toUpperCase()+d.current.slice(1);
+    const sel=$('browserSelect'), lbl=$('browserLabel');
+    const cur=d.current||'built-in';
+    currentBrowser=cur;
+    updateControlUI(d.control_mode||'takeover');
+    lbl.textContent= cur==='built-in'?'Built-in':cur.charAt(0).toUpperCase()+cur.slice(1);
     sel.innerHTML='<option value="">Built-in Chromium</option>';
     (d.available||[]).forEach(b=>{
       const name=b.name.charAt(0).toUpperCase()+b.name.slice(1);
-      const selected=b.name===d.current?' selected':'';
+      const selected=b.name===cur?' selected':'';
       sel.innerHTML+=`<option value="${b.name}"${selected}>${name}</option>`;
     });
-    // When using a real browser, the preview pane goes blank - that's
-    // intentional (screenshots would steal focus). Tell the user.
-    const badge=document.getElementById('prevBadge');
-    if(d.current!=='built-in'){
-      badge.textContent='Watch your '+d.current+' window';
-    }else{
-      badge.textContent='No preview';
+    const badge=$('prevBadge');
+    if(cur!=='built-in'){
+      badge.textContent='live '+cur;
+      takeScreenshot(true);
+    } else if(badge.textContent==='no preview' || !$('prevImg').src.includes('data:image/jpeg')){
+      resetPreview();
     }
+    startPreviewPolling();
   }catch(e){}
 }
 async function switchBrowser(){
-  const sel=document.getElementById('browserSelect');
-  const browser=sel.value;
-  const btn=document.getElementById('switchBtn');
-  btn.disabled=true;btn.textContent='Switching...';
+  const sel=$('browserSelect'), browser=sel.value, btn=$('switchBtn');
+  btn.disabled=true;btn.textContent='Switching…';
   try{
     let result;
     if(browser){
-      log('Launching '+browser+' with your profile... (close it first if open)','');
-      toast('Close '+browser+' first (Cmd+Q), then it will relaunch with your profile','info');
+      log('Launching controlled '+browser+' window','');
+      toast('Close '+browser+' first (⌘Q) if it is already open','info');
       result=await(await fetch('/api/browser/launch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({browser}),signal:AbortSignal.timeout(25000)})).json();
-    }else{
-      log('Switching to built-in Chromium...','');
+    } else {
+      log('Switching to built-in Chromium','');
       result=await(await fetch('/api/browser/builtin',{method:'POST'})).json();
     }
     if(result.success!==false){
-      toast(result.message||'Browser switched','ok');
       log(result.message||'Switched','ok');
-    }else{
-      toast(result.error||'Failed - make sure the browser is fully closed (Cmd+Q) first','err');
+    } else {
+      toast(result.error||'Switch failed. Make sure the browser is fully closed first','err');
       log(result.error||'Switch failed','err');
     }
     loadBrowsers();
@@ -522,17 +1601,240 @@ async function switchBrowser(){
   finally{btn.disabled=false;btn.textContent='Switch'}
 }
 
+function updateControlUI(mode){
+  browserControlMode=mode==='hands_off'?'hands_off':'takeover';
+  const btn=$('controlBtn');
+  if(!btn)return;
+  const taking=browserControlMode==='takeover';
+  btn.classList.toggle('control-on', taking);
+  btn.classList.toggle('control-off', !taking);
+  btn.textContent=taking?'Control on':'View only';
+  btn.title=taking?'Preview clicks control the browser. Click for view-only mode.':'Preview clicks are blocked. Click to take control.';
+}
+async function setBrowserControl(mode){
+  try{
+    const r=await fetch('/api/browser/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})});
+    const d=await r.json();
+    if(d.success===false){toast(d.error||'Control switch failed','err');return}
+    updateControlUI(d.mode);
+  }catch(e){toast('Control switch failed','err')}
+}
+function toggleBrowserControl(){
+  setBrowserControl(browserControlMode==='takeover'?'hands_off':'takeover');
+}
+function startPreviewPolling(){
+  if(previewTimer)clearInterval(previewTimer);
+  previewTimer=null;
+  if(currentBrowser==='built-in')return;
+  previewTimer=setInterval(()=>{if(!running)takeScreenshot(true)}, 1800);
+}
+async function clickPreview(e){
+  if(browserControlMode!=='takeover'){
+    toast('Hands off is enabled. Click Take over first.','warn');
+    return;
+  }
+  const img=$('prevImg');
+  if(!img || !img.naturalWidth || !img.naturalHeight || $('previewEmpty').style.display!=='none'){
+    return;
+  }
+  const rect=img.getBoundingClientRect();
+  const imgRatio=img.naturalWidth/img.naturalHeight;
+  const boxRatio=rect.width/rect.height;
+  let w,h,ox,oy;
+  if(boxRatio>imgRatio){
+    h=rect.height; w=h*imgRatio; ox=(rect.width-w)/2; oy=0;
+  }else{
+    w=rect.width; h=w/imgRatio; ox=0; oy=(rect.height-h)/2;
+  }
+  const x=(e.clientX-rect.left-ox)/w;
+  const y=(e.clientY-rect.top-oy)/h;
+  if(x<0||x>1||y<0||y>1)return;
+  try{
+    const r=await fetch('/api/browser/click',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({x,y})});
+    const d=await r.json();
+    if(d.success===false){toast(d.error||'Click failed','err');return}
+    setTimeout(()=>takeScreenshot(true),250);
+  }catch(_){toast('Click failed','err')}
+}
+async function toggleBrowserPop(ev){
+  if(ev)ev.stopPropagation();
+  const pop=$('browserPop'), badge=$('browserBadge');
+  if(!pop.hidden){closeBrowserPop();return}
+  try{
+    const r=await fetch('/api/browser/status');
+    const d=await r.json();
+    const cur=d.current||'built-in';
+    const opts=[{name:'built-in',label:'Built-in Chromium'}]
+      .concat((d.available||[]).map(b=>({name:b.name, label:b.name.charAt(0).toUpperCase()+b.name.slice(1)})));
+    pop.innerHTML=opts.map(o=>`
+      <button class="bpop-item${o.name===cur?' active':''}" data-b="${o.name==='built-in'?'':o.name}" type="button" role="option" aria-selected="${o.name===cur}">
+        <span class="bpop-dot" aria-hidden="true"></span>
+        <span class="bpop-label">${esc(o.label)}</span>
+        ${o.name===cur?'<span class="bpop-current">current</span>':''}
+      </button>`).join('');
+    pop.querySelectorAll('.bpop-item').forEach(b=>b.addEventListener('click',(e)=>{
+      e.stopPropagation();
+      if(b.classList.contains('active')){closeBrowserPop();return}
+      pop.querySelectorAll('.bpop-item').forEach(x=>x.classList.add('busy'));
+      const sel=$('browserSelect');
+      sel.value=b.dataset.b;
+      closeBrowserPop();
+      switchBrowser();
+    }));
+    pop.hidden=false;
+    badge.setAttribute('aria-expanded','true');
+  }catch(e){toast('Could not load browsers','err')}
+}
+function closeBrowserPop(){
+  const pop=$('browserPop'); if(!pop) return;
+  pop.hidden=true;
+  const badge=$('browserBadge'); if(badge) badge.setAttribute('aria-expanded','false');
+}
+document.addEventListener('click',(e)=>{
+  const pop=$('browserPop'); if(!pop || pop.hidden) return;
+  if(pop.contains(e.target)) return;
+  if(e.target.closest('#browserBadge')) return;
+  closeBrowserPop();
+});
+document.addEventListener('keydown',(e)=>{
+  if(e.key==='Escape'){const pop=$('browserPop'); if(pop && !pop.hidden){closeBrowserPop()}}
+});
+document.addEventListener('fullscreenchange',()=>{
+  if(!document.fullscreenElement && document.body.classList.contains('screen-only')){
+    applyScreenOnly(false);
+  }
+});
+
 async function loadProviders(){
   try{
     const r=await fetch('/api/status');const d=await r.json();
-    const names=(d.providers||[]).map(p=>p.name+(p.local?'(local)':'')).join(' -> ');
-    document.getElementById('aiTag').textContent=names||'no AI';
-    document.getElementById('aiTag').title='AI cascade: '+(d.providers||[]).map(p=>p.name+':'+p.model).join(' -> ');
+    const mode=d.provider_mode||'api';
+    setProviderVisual((d.providers||[]).length?'ready':'missing', (d.providers||[]).length?mode:'setup required');
+    updateProviderModeUI(mode);
+    $('aiTag').title='AI cascade: '+(d.providers||[]).map(p=>p.name+':'+p.model).join(' → ');
   }catch(e){}
 }
+function updateProviderModeUI(mode){
+  document.querySelectorAll('#providerModeSeg button').forEach(b=>{
+    b.classList.toggle('active', b.dataset.mode===(mode||'api'));
+  });
+}
+async function setProviderMode(mode){
+  try{
+    const r=await fetch('/api/provider/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})});
+    const d=await r.json();
+    if(d.success===false){toast(d.error||'Could not switch provider','err');return}
+    updateProviderModeUI(d.mode||mode);
+    loadProviders();
+  }catch(e){toast('Could not switch provider','err')}
+}
 
-/* === Init === */
-connectWS();loadBrowsers();loadProviders();
+/* ============== palette ============== */
+const PALETTE=[
+  {key:'/google',    label:'Google search',          fill:r=>'Go to Google and search for '+(r||'…')},
+  {key:'/wikipedia', label:'Wikipedia search',       fill:r=>'Navigate to Wikipedia and search for '+(r||'…')},
+  {key:'/hn',        label:'Hacker News top stories',fill:_=>'Go to news.ycombinator.com and extract the top 10 stories'},
+  {key:'/github',    label:'GitHub trending',        fill:_=>'Go to github.com/trending and list the top trending repos'},
+  {key:'/extract',   label:'Extract data from current page', action:extractData},
+  {key:'/capture',   label:'Capture screenshot',     action:takeScreenshot},
+  {key:'/screen',    label:'Toggle fullscreen',       action:toggleScreenOnly},
+  {key:'/clear',     label:'Clear workspace',        action:clearAll},
+  {key:'/inspect',   label:'Toggle inspector',       action:toggleInspector},
+  {key:'/theme',     label:'Toggle theme',           action:toggleTheme},
+];
+function updatePalette(){
+  const input=$('taskInput'), pal=$('palette');
+  const val=input.value;
+  if(!val.startsWith('/')){pal.hidden=true;palItems=[];return}
+  const parts=val.split(/\s+/);
+  const q=parts[0].toLowerCase();
+  const matches=PALETTE.filter(c=>c.key.startsWith(q));
+  if(!matches.length){pal.hidden=true;palItems=[];return}
+  palItems=matches;
+  palActive=Math.min(palActive, matches.length-1);
+  if(palActive<0)palActive=0;
+  pal.innerHTML=matches.map((c,i)=>`
+    <button class="pal-item${i===palActive?' active':''}" data-i="${i}" type="button">
+      <span class="pal-key">${c.key}</span>
+      <span class="pal-label">${c.label}</span>
+    </button>`).join('');
+  pal.hidden=false;
+  pal.querySelectorAll('.pal-item').forEach(b=>b.addEventListener('click',()=>{palActive=parseInt(b.dataset.i);runPaletteItem()}));
+}
+function runPaletteItem(){
+  const c=palItems[palActive]; if(!c)return;
+  const input=$('taskInput'), pal=$('palette');
+  const parts=input.value.split(/\s+/);
+  const rest=parts.slice(1).join(' ');
+  if(c.action){
+    input.value='';
+    pal.hidden=true;
+    c.action();
+  } else if(c.fill){
+    input.value=c.fill(rest);
+    pal.hidden=true;
+    input.focus();
+    // place caret at end
+    const v=input.value;input.setSelectionRange(v.length,v.length);
+  }
+}
+function cyclePalette(d){
+  if(!palItems.length)return;
+  palActive=(palActive+d+palItems.length)%palItems.length;
+  const pal=$('palette');
+  pal.querySelectorAll('.pal-item').forEach((el,i)=>el.classList.toggle('active', i===palActive));
+}
+
+/* ============== input wiring ============== */
+const ti=$('taskInput');
+ti.addEventListener('input',()=>{
+  // autosize
+  ti.style.height='auto';
+  ti.style.height=Math.min(ti.scrollHeight, 160)+'px';
+  updatePalette();
+});
+ti.addEventListener('keydown',(e)=>{
+  const palOpen=!$('palette').hidden;
+  if(palOpen){
+    if(e.key==='ArrowDown'){e.preventDefault();cyclePalette(1);return}
+    if(e.key==='ArrowUp'){e.preventDefault();cyclePalette(-1);return}
+    if(e.key==='Enter' && !e.shiftKey){e.preventDefault();runPaletteItem();return}
+    if(e.key==='Escape'){e.preventDefault();ti.value='';$('palette').hidden=true;return}
+  }
+  // Enter runs the task; Shift+Enter inserts a newline (default textarea behavior)
+  if(e.key==='Enter' && !e.shiftKey && !e.isComposing){e.preventDefault();runTask();return}
+});
+
+/* ============== global keys ============== */
+document.addEventListener('keydown',(e)=>{
+  if(e.key==='Escape'){
+    const pop=$('browserPop');
+    if(pop && !pop.hidden)return;
+    if(document.body.classList.contains('screen-only') && !running){
+      applyScreenOnly(false);
+      if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});
+      return;
+    }
+    if(running)stopTask();
+  }
+  else if((e.metaKey||e.ctrlKey) && (e.key==='d'||e.key==='D') && !e.shiftKey && document.activeElement!==ti){e.preventDefault();toggleTheme()}
+  else if((e.metaKey||e.ctrlKey) && e.key==='\\'){e.preventDefault();toggleInspector()}
+  else if(e.key==='/' && document.activeElement!==ti && !/^(input|textarea|select)$/i.test(document.activeElement.tagName||'')){
+    e.preventDefault();
+    ti.focus();
+    if(!ti.value.startsWith('/'))ti.value='/';
+    ti.setSelectionRange(ti.value.length, ti.value.length);
+    updatePalette();
+  }
+});
+$('prevImg').addEventListener('click', clickPreview);
+
+/* ============== init ============== */
+connectWS();
+loadBrowsers();
+loadProviders();
+loadTmpls();
+initVoice();
 </script>
 </body>
 </html>

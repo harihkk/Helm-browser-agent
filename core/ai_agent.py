@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
 
+from .intent_planner import IntentPlanner
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -96,16 +98,13 @@ class GroqAIAgent:
                  gemini_api_key: str = "",
                  gemini_model: str = "gemini-2.0-flash",
                  ollama_url: str = "",
-                 ollama_model: str = ""):
-        if not api_key or api_key == "your-groq-api-key-here":
-            raise ValueError("Please set a valid Groq API key in your .env file")
-        if not GROQ_AVAILABLE:
-            raise ValueError("Groq package not available")
-
-        self.client = Groq(api_key=api_key)
+                 ollama_model: str = "",
+                 provider_mode: str = "api"):
         self.model = model
         self.eval_model = eval_model
         self.token_tracker = TokenTracker()
+        self.intent_planner = IntentPlanner()
+        self._groq_enabled = False
 
         # Provider cascade: Groq -> Gemini -> Ollama (local). Each is a
         # best-effort fallback for the layer above. Ollama is last because
@@ -116,16 +115,66 @@ class GroqAIAgent:
 
         self._ollama_url = (ollama_url or "").rstrip('/')
         self._ollama_model = ollama_model
+        self._provider_mode = self._normalize_provider_mode(provider_mode)
 
         self._gemini_fallback_count = 0
         self._ollama_fallback_count = 0
 
-        providers = [f"Groq:{model}"]
+        self.client = None
+        if api_key and api_key != "your-groq-api-key-here":
+            if not GROQ_AVAILABLE:
+                raise ValueError("Groq package not available")
+            self.client = Groq(api_key=api_key)
+            self._groq_enabled = True
+
+        if not (self._groq_enabled or self._gemini_key or (self._ollama_url and self._ollama_model)):
+            raise ValueError(
+                "Please configure at least one AI provider: GROQ_API_KEY, "
+                "GEMINI_API_KEY, or OLLAMA_BASE_URL/OLLAMA_MODEL"
+            )
+
+        providers = []
+        if self._groq_enabled:
+            providers.append(f"Groq:{model}")
         if self._gemini_key:
             providers.append(f"Gemini:{gemini_model}")
         if self._ollama_url and self._ollama_model:
             providers.append(f"Ollama:{ollama_model}")
         logger.info(f"AI cascade ready - {' -> '.join(providers)}")
+
+    def _normalize_provider_mode(self, mode: str) -> str:
+        mode = (mode or "api").strip().lower()
+        if mode in ("local", "ollama"):
+            return "local"
+        return "api"
+
+    @property
+    def provider_mode(self) -> str:
+        return self._provider_mode
+
+    def set_provider_mode(self, mode: str) -> Dict[str, Any]:
+        next_mode = self._normalize_provider_mode(mode)
+        if next_mode == "local" and not (self._ollama_url and self._ollama_model):
+            return {
+                "success": False,
+                "mode": self._provider_mode,
+                "error": "Local mode needs OLLAMA_BASE_URL and OLLAMA_MODEL.",
+            }
+        if next_mode == "api" and not (self._groq_enabled or self._gemini_key):
+            if self._ollama_url and self._ollama_model:
+                self._provider_mode = "local"
+                return {
+                    "success": True,
+                    "mode": self._provider_mode,
+                    "message": "No API provider configured. Staying on local mode.",
+                }
+            return {
+                "success": False,
+                "mode": self._provider_mode,
+                "error": "API mode needs GROQ_API_KEY or GEMINI_API_KEY.",
+            }
+        self._provider_mode = next_mode
+        return {"success": True, "mode": self._provider_mode}
 
     # ------------------------------------------------------------------ #
     # Analyze page and decide next action
@@ -133,6 +182,14 @@ class GroqAIAgent:
 
     async def analyze_page_text(self, page_state: Dict, task_goal: str,
                                 context: Dict) -> Dict[str, Any]:
+        blocked = self._blocked_site_action(task_goal, page_state, context)
+        if blocked:
+            return blocked
+
+        quick = self._quick_action(task_goal, page_state, context)
+        if quick:
+            return quick
+
         elements = self._format_elements(page_state.get('elements', []))
         history = self._format_history(context.get('action_history', []))
         repeat_warn = self._repeat_warning(context.get('action_history', []))
@@ -168,7 +225,7 @@ ACTIONS:
 RULES:
 1. Use EXACT selectors from the elements list. Prefer #id, then [name=...], then others.
 2. After typing in a search box, ALWAYS use press_key Enter next (or click the submit button).
-3. If the page shows the results you need (title/content match the goal), use "done" with a detailed summary of what you found.
+3. If the page shows the results you need (title/content/url match the goal), use "done" with a detailed summary of what you found.
 4. NEVER scroll more than 3 times total. If scrolling isn't revealing new information, use "done" or "extract".
 5. If the page has loaded and shows content matching the goal, use "done" immediately with a full summary.
 6. NEVER repeat the same action with the same parameters. Try something different.
@@ -178,6 +235,8 @@ RULES:
 10. When the page content contains what the user asked for, use "done" with a comprehensive summary including the actual data found.
 11. "extract" returns the full page content. Use it when you need to capture data, then use "done" on the next step.
 12. Only one action per response. Pick the single most useful next step.
+13. For GitHub user/profile lookup tasks, prefer direct user URLs like https://github.com/<username>. Do NOT use GitHub advanced search unless the user explicitly asks for advanced search.
+14. If a direct URL pattern is obvious, navigate there instead of filling multi-field forms.
 
 JSON only:
 {{"thinking": "...", "action": "...", "parameters": {{}}, "reasoning": "...", "confidence": 0.8, "task_complete": false}}"""
@@ -331,6 +390,24 @@ JSON: {{"action": "...", "parameters": {{}}, "reasoning": "..."}}"""
         if configured. On daily quota exhaustion, short-circuit immediately -
         no point burning 45 seconds of retries for an error that won't clear
         for hours."""
+        if self._provider_mode == "local":
+            if self._ollama_url and self._ollama_model:
+                logger.info("Provider mode is local; using Ollama")
+                return await self._call_ollama(prompt)
+            raise RuntimeError(
+                "Local mode is selected, but Ollama is not configured. "
+                "Set OLLAMA_BASE_URL and OLLAMA_MODEL."
+            )
+
+        if not self.client:
+            if self._gemini_key:
+                logger.warning("Groq not configured; using Gemini")
+                return await self._call_gemini(prompt)
+            if self._ollama_url and self._ollama_model:
+                logger.warning("No API provider configured; using local Ollama")
+                return await self._call_ollama(prompt)
+            raise RuntimeError("No AI provider configured")
+
         use_model = model or self.model
         last_err: Optional[Exception] = None
         for attempt in range(retries):
@@ -519,6 +596,74 @@ JSON: {{"action": "...", "parameters": {{}}, "reasoning": "..."}}"""
     # Formatting
     # ------------------------------------------------------------------ #
 
+    def _quick_action(self, goal: str, state: Dict = None, ctx: Dict = None) -> Optional[Dict[str, Any]]:
+        """Deterministic routing for obvious browser tasks.
+
+        This keeps simple jobs from being over-thought by the LLM. The model
+        can still handle the messy cases; these rules cover high-confidence
+        direct URL/search patterns.
+        """
+        state = state or {}
+        ctx = ctx or {}
+        planner = getattr(self, "intent_planner", None)
+        if planner is None:
+            planner = IntentPlanner()
+            self.intent_planner = planner
+        return planner.plan(goal, state, ctx.get('action_history', []) or [])
+
+    def _blocked_site_action(self, goal: str, state: Dict = None,
+                             ctx: Dict = None) -> Optional[Dict[str, Any]]:
+        state = state or {}
+        url = (state.get('url') or '').lower()
+        title = (state.get('title') or '').lower()
+        content = (state.get('content') or '').lower()
+        goal_lower = (goal or '').lower()
+        history = (ctx or {}).get('action_history', []) or []
+
+        if ("google." in url or "google.com" in url) and history:
+            bot_check = (
+                ("unusual traffic" in content and "not a robot" in content)
+                or "recaptcha" in content
+                or "our systems have detected unusual traffic" in content
+            )
+            if bot_check:
+                return {
+                    "error": "site_blocked_by_bot_check",
+                    "message": (
+                        "Google is showing a reCAPTCHA / unusual-traffic page. "
+                        "Use the target site's own search, switch to an external "
+                        "browser session, or solve the challenge manually before retrying."
+                    ),
+                    "thinking": "Google blocked the automated search behind a bot check.",
+                    "action": "blocked",
+                    "parameters": {},
+                    "reasoning": "The browser is on a Google anti-bot challenge page.",
+                    "confidence": 0.96,
+                    "task_complete": False,
+                }
+
+        if "linkedin" in goal_lower and "linkedin.com" in url:
+            auth_wall = (
+                "sign in" in content
+                and ("join now" in content or "continue with google" in content)
+                and ("explore jobs" in content or "grow your network" in content or "linkedin" in title)
+            )
+            if auth_wall and history:
+                return {
+                    "error": "site_requires_sign_in",
+                    "message": (
+                        "LinkedIn is showing a sign-in wall. Sign in, switch to an external "
+                        "browser with your session, or use View only/Handoff before retrying."
+                    ),
+                    "thinking": "LinkedIn blocked the people search behind a sign-in wall.",
+                    "action": "blocked",
+                    "parameters": {},
+                    "reasoning": "The requested LinkedIn search cannot continue from the current unauthenticated page.",
+                    "confidence": 0.95,
+                    "task_complete": False,
+                }
+        return None
+
     def _format_elements(self, elements: List[Dict]) -> str:
         if not elements:
             return "No interactive elements found."
@@ -652,15 +797,17 @@ JSON: {{"action": "...", "parameters": {{}}, "reasoning": "..."}}"""
                     "reasoning": "Recent actions are idle; no further progress expected",
                     "confidence": 0.6, "task_complete": True}
 
-        # If on a search page, try to type the goal as a search query
+        # If on a search page, try to type the cleaned goal as a search query.
+        # Never dump the whole instruction into the search box.
         content = state.get('content', '') if state else ''
         elements = state.get('elements', []) if state else []
         for el in elements:
             attrs = el.get('attributes', {})
             if el.get('tag_name') == 'input' and attrs.get('type', 'text') in ('text', 'search', ''):
                 sel = f"#{attrs['id']}" if attrs.get('id') else el.get('primary_selector', 'input[type=text]')
+                query = self._clean_search_text(goal)
                 return {"thinking": "Found search input, typing query",
-                        "action": "type", "parameters": {"selector": sel, "text": goal[:80]},
+                        "action": "type", "parameters": {"selector": sel, "text": query[:120]},
                         "reasoning": f"Typing search query into {sel}",
                         "confidence": 0.6, "task_complete": False}
 
@@ -677,6 +824,17 @@ JSON: {{"action": "...", "parameters": {{}}, "reasoning": "..."}}"""
                            parameters={"url": "https://www.google.com"},
                            reasoning=r, expected_outcome="Google loaded",
                            success_criteria=["Page loaded"], confidence=0.8)]
+
+    def _clean_search_text(self, goal: str) -> str:
+        text = re.sub(r'https?://[^\s]+', ' ', goal or '', flags=re.I)
+        text = re.sub(
+            r'\b(?:can you|can u|cna u|please|plz|go|got|o|to|on|over|and|search|for|look|find|open|visit|actually|really|play|watch|listen|write|create|add|show|me|the|that|this|site|website|page|result|results|youtube|google|github|amazon|reddit|linkedin|song|video|music)\b',
+            ' ',
+            text,
+            flags=re.I,
+        )
+        text = re.sub(r'\s+', ' ', text).strip(" .,:;")
+        return text or (goal or '')[:80]
 
     def get_token_stats(self) -> Dict:
         return self.token_tracker.get_session_stats()

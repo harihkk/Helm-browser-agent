@@ -4,9 +4,11 @@ Browser Engine - Supports built-in Chromium or user's own browser (Brave, Vivald
 
 import asyncio
 import base64
+import contextlib
 import difflib
 import json
 import os
+import re
 import time
 import logging
 from typing import Dict, List, Any, Optional
@@ -14,6 +16,14 @@ from datetime import datetime
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 from bs4 import BeautifulSoup
+
+from .action_registry import (
+    UnsafeTextPayloadError,
+    UnsupportedActionError,
+    normalize_action_name,
+    validate_action,
+    validate_text_payload,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -56,6 +66,13 @@ class PageState:
 
 
 class AdvancedBrowserEngine:
+    AMAZON_ACCESSORY_TERMS = (
+        "case", "cover", "screen protector", "protector", "keyboard", "pencil",
+        "stylus", "charger", "cable", "adapter", "dock", "hub", "stand",
+        "mount", "sleeve", "folio", "replacement", "paperlike", "paper",
+        "skin", "holder", "tempered glass", "privacy filter",
+    )
+
     def __init__(self, headless: bool = False, screenshots_dir: str = "./screenshots"):
         self.playwright = None
         self.browser: Optional[Browser] = None
@@ -66,6 +83,10 @@ class AdvancedBrowserEngine:
         self._previous_content: Dict[str, str] = {}
         self._alive = False
         self._browser_name = "built-in"  # "built-in", "brave", "vivaldi", etc.
+        self._control_mode = "takeover"
+        self._browser_process = None
+        self._closing = False
+        self._closed_by_user = False
 
     def get_available_browsers(self) -> List[Dict[str, str]]:
         """Detect which Chromium-based browsers are installed."""
@@ -80,9 +101,23 @@ class AdvancedBrowserEngine:
         return self._browser_name
 
     @property
+    def control_mode(self) -> str:
+        return self._control_mode
+
+    def set_control_mode(self, mode: str) -> Dict[str, Any]:
+        mode = (mode or "").strip().lower().replace("-", "_")
+        if mode in ("takeover", "take_over", "control"):
+            self._control_mode = "takeover"
+        elif mode in ("hands_off", "handoff", "hand_off", "view"):
+            self._control_mode = "hands_off"
+        else:
+            return {"success": False, "error": "Mode must be takeover or hands_off"}
+        return {"success": True, "mode": self._control_mode}
+
+    @property
     def is_alive(self) -> bool:
         """Check if browser is actually usable."""
-        if not self._alive or not self.browser:
+        if self._closed_by_user or not self._alive or not self.browser:
             return False
         try:
             return self.browser.is_connected()
@@ -93,17 +128,16 @@ class AdvancedBrowserEngine:
         """Start built-in Chromium."""
         logger.info("Starting browser engine...")
         try:
-            if self.playwright:
-                try:
-                    await self.playwright.stop()
-                except Exception:
-                    pass
+            if self.browser or self.playwright or self.contexts or self.pages:
+                await self.close()
 
             self.playwright = await async_playwright().start()
             self.browser = await self.playwright.chromium.launch(
                 headless=self.headless,
                 args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
             )
+            self.browser.on("disconnected", self._handle_browser_disconnected)
+            self._closed_by_user = False
             await self._create_default_context()
             os.makedirs(self.screenshots_dir, exist_ok=True)
             self._alive = True
@@ -122,9 +156,11 @@ class AdvancedBrowserEngine:
     async def launch_browser(self, browser_name: str) -> Dict[str, Any]:
         """Launch a fresh CDP-controlled instance of the user's browser.
 
-        Uses a dedicated temp profile (NOT their real profile) so it works
-        even if their normal browser is already open. On any failure, always
-        falls back to built-in Chromium so the system stays functional.
+        Uses a dedicated temp profile (NOT their real profile). On macOS we
+        ask the user to quit an already-running copy first because some apps
+        route new launches into the existing process and ignore our CDP flags.
+        On any failure, always falls back to built-in Chromium so the system
+        stays functional.
         """
         import subprocess
         import tempfile
@@ -249,6 +285,8 @@ class AdvancedBrowserEngine:
             try:
                 self.playwright = await async_playwright().start()
                 self.browser = await self.playwright.chromium.connect_over_cdp(cdp_url)
+                self.browser.on("disconnected", self._handle_browser_disconnected)
+                self._closed_by_user = False
             except Exception as e:
                 return await _fallback(f"Playwright CDP connect failed: {e}")
 
@@ -258,6 +296,7 @@ class AdvancedBrowserEngine:
                 ctx = contexts[0] if contexts else await self.browser.new_context(
                     viewport={'width': 1280, 'height': 720})
                 page = await ctx.new_page()
+                self._watch_page_close(context_id="default", page=page)
                 self.contexts["default"] = ctx
                 self.pages["default"] = page
             except Exception as e:
@@ -266,6 +305,7 @@ class AdvancedBrowserEngine:
             os.makedirs(self.screenshots_dir, exist_ok=True)
             self._alive = True
             self._browser_name = browser_name
+            self._control_mode = "hands_off"
 
             logger.info(f"{browser_name} launched and connected via CDP")
             return {
@@ -280,7 +320,7 @@ class AdvancedBrowserEngine:
 
     async def switch_to_builtin(self) -> Dict[str, Any]:
         """Switch back to built-in Chromium."""
-        if self._browser_name == "built-in":
+        if self._browser_name == "built-in" and self.is_alive:
             return {"success": True, "message": "Already using built-in Chromium"}
         # Kill the CDP browser process
         if hasattr(self, '_browser_process') and self._browser_process:
@@ -293,6 +333,7 @@ class AdvancedBrowserEngine:
         await asyncio.sleep(0.5)
         await self.start()
         self._browser_name = "built-in"
+        self._control_mode = "takeover"
         return {"success": True, "message": "Switched to built-in Chromium"}
 
     async def _create_default_context(self):
@@ -307,17 +348,132 @@ class AdvancedBrowserEngine:
                 ignore_https_errors=True
             )
             page = await ctx.new_page()
+            self._watch_page_close(context_id="default", page=page)
             self.contexts["default"] = ctx
             self.pages["default"] = page
         except Exception as e:
             logger.error(f"Failed to create context: {e}")
+
+    async def _ensure_page(self, context_id: str = "default") -> Optional[Page]:
+        if self._closed_by_user:
+            return None
+        if not self.browser or not self.is_alive:
+            self._alive = False
+            return None
+
+        page = self.pages.get(context_id)
+        if page:
+            try:
+                await page.title()
+                return page
+            except Exception:
+                pass
+
+        old_ctx = self.contexts.pop(context_id, None)
+        self.pages.pop(context_id, None)
+        if old_ctx:
+            try:
+                await old_ctx.close()
+            except Exception:
+                pass
+
+        if context_id == "default":
+            await self._create_default_context()
+            return self.pages.get("default")
+
+        if not self.browser:
+            return None
+        try:
+            ctx = await self.browser.new_context(
+                viewport={'width': 1280, 'height': 720},
+                user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                java_script_enabled=True,
+                ignore_https_errors=True
+            )
+            page = await ctx.new_page()
+            self._watch_page_close(context_id=context_id, page=page)
+            self.contexts[context_id] = ctx
+            self.pages[context_id] = page
+            return page
+        except Exception as e:
+            logger.error(f"Failed to recreate page {context_id}: {e}")
+            return None
+
+    def _watch_page_close(self, context_id: str, page: Page) -> None:
+        """Treat a user-closed default page as a real browser shutdown."""
+        page.on("close", lambda _: self._schedule_page_closed(context_id))
+
+    def _schedule_page_closed(self, context_id: str) -> None:
+        if self._closing:
+            return
+        try:
+            asyncio.get_running_loop().create_task(
+                self._handle_page_closed(context_id))
+        except RuntimeError:
+            self._alive = False
+            self._closed_by_user = context_id == "default"
+
+    async def _handle_page_closed(self, context_id: str) -> None:
+        if self._closing:
+            return
+        self.pages.pop(context_id, None)
+        if context_id != "default":
+            return
+
+        logger.info("Default browser page was closed; releasing Playwright browser")
+        self._closed_by_user = True
+        await self.close(mark_manual=True)
+
+    def _handle_browser_disconnected(self, *args) -> None:
+        if self._closing:
+            return
+        logger.info("Browser disconnected")
+        try:
+            asyncio.get_running_loop().create_task(
+                self._cleanup_disconnected_browser())
+        except RuntimeError:
+            self._alive = False
+            self._closed_by_user = True
+            self.browser = None
+            self.contexts.clear()
+            self.pages.clear()
+
+    async def _cleanup_disconnected_browser(self) -> None:
+        if self._closing:
+            return
+        self._closing = True
+        self._alive = False
+        self._closed_by_user = True
+        self.browser = None
+        self.contexts.clear()
+        self.pages.clear()
+        try:
+            if self.playwright:
+                with contextlib.suppress(Exception):
+                    await self.playwright.stop()
+                self.playwright = None
+            self._terminate_owned_process()
+        finally:
+            self._closing = False
+
+    def _terminate_owned_process(self) -> None:
+        if not self._browser_process:
+            return
+        proc = self._browser_process
+        self._browser_process = None
+        with contextlib.suppress(Exception):
+            proc.terminate()
+            proc.wait(timeout=3)
+        if proc.poll() is None:
+            with contextlib.suppress(Exception):
+                proc.kill()
 
     # ------------------------------------------------------------------ #
     # Page state
     # ------------------------------------------------------------------ #
 
     async def get_page_state(self, context_id: str = "default") -> PageState:
-        page = self.pages.get(context_id)
+        page = await self._ensure_page(context_id)
         if not page:
             return PageState("error", "No Browser", "", [], error="Browser not available")
         try:
@@ -449,7 +605,13 @@ class AdvancedBrowserEngine:
 
     async def execute_action(self, context_id: str, action_type: str,
                              parameters: Dict) -> Dict[str, Any]:
-        page = self.pages.get(context_id)
+        action_type = normalize_action_name(action_type)
+        try:
+            validate_action(action_type, parameters or {}, executable_only=True)
+        except UnsupportedActionError as e:
+            return {'success': False, 'error': str(e), 'fatal': False}
+
+        page = await self._ensure_page(context_id)
         if not page:
             return {'success': False, 'error': 'No browser page', 'fatal': True}
 
@@ -459,13 +621,25 @@ class AdvancedBrowserEngine:
         except Exception:
             return {'success': False, 'error': 'Browser page has been closed', 'fatal': True}
 
-        try:
-            result = await self._do_action(page, action_type, parameters)
-            return result
-        except Exception as e:
-            err = str(e)
-            fatal = 'has been closed' in err or 'Target closed' in err
-            return {'success': False, 'error': err, 'fatal': fatal}
+        for attempt in range(2):
+            try:
+                result = await self._do_action(page, action_type, parameters)
+                return result
+            except Exception as e:
+                err = str(e)
+                fatal = 'has been closed' in err or 'Target closed' in err
+                transient_nav = (
+                    'Execution context was destroyed' in err
+                    or 'navigation' in err.lower()
+                )
+                if attempt == 0 and transient_nav and not fatal:
+                    with contextlib.suppress(Exception):
+                        await self._smart_wait(page, dom_timeout=2.0, idle_timeout=1.0)
+                    await asyncio.sleep(0.2)
+                    continue
+                return {'success': False, 'error': err, 'fatal': fatal}
+
+        return {'success': False, 'error': 'Action failed after retry', 'fatal': False}
 
     async def _do_action(self, page: Page, action_type: str, params: Dict) -> Dict:
         if action_type == 'navigate':
@@ -495,6 +669,13 @@ class AdvancedBrowserEngine:
             sel = params.get('selector', '')
             text = params.get('text', '')
             if sel and text:
+                try:
+                    validate_text_payload(
+                        text,
+                        allow_full_command=bool(params.get('allow_full_command')),
+                    )
+                except UnsafeTextPayloadError as e:
+                    return {'success': False, 'action': 'type', 'error': str(e)}
                 target, resolved_sel = await self._resolve_typeable(page, sel)
                 if target is None:
                     return {'success': False, 'action': 'type',
@@ -574,6 +755,103 @@ class AdvancedBrowserEngine:
             await asyncio.sleep(dur)
             return {'success': True, 'action': 'wait', 'duration': dur}
 
+        elif action_type == 'open_top_github_repo':
+            user = params.get('user', '')
+            repo_url = await page.evaluate("""
+                (user) => {
+                    const clean = String(user || '').toLowerCase();
+                    const hrefs = [...document.querySelectorAll('a[href^="/"]')]
+                        .map(a => ({ href: a.getAttribute('href') || '', text: (a.textContent || '').trim() }));
+                    const candidates = hrefs
+                        .map(item => item.href.split('?')[0].replace(/\\/$/, ''))
+                        .filter(href => {
+                            const parts = href.split('/').filter(Boolean);
+                            return parts.length === 2 && parts[0].toLowerCase() === clean;
+                        });
+                    const href = candidates[0];
+                    return href ? `https://github.com${href}` : '';
+                }
+            """, user)
+            if not repo_url:
+                return {
+                    'success': False,
+                    'action': 'open_top_github_repo',
+                    'error': f'Could not find a repository link for {user}',
+                }
+            await page.goto(repo_url, timeout=25000, wait_until='domcontentloaded')
+            await self._smart_wait(page)
+            return {'success': True, 'action': 'open_top_github_repo', 'url': repo_url}
+
+        elif action_type == 'open_first_search_result':
+            preferred_domain = (params.get('domain') or '').lower().removeprefix('www.')
+            result_url = await page.evaluate("""
+                (preferredDomain) => {
+                    const badHosts = new Set([
+                        'google.com', 'www.google.com', 'accounts.google.com',
+                        'support.google.com', 'policies.google.com'
+                    ]);
+                    function normalizeHref(raw) {
+                        if (!raw) return '';
+                        try {
+                            const url = new URL(raw, location.href);
+                            if (url.hostname.endsWith('google.com') && url.pathname === '/url') {
+                                return url.searchParams.get('q') || '';
+                            }
+                            return url.href;
+                        } catch (_) {
+                            return '';
+                        }
+                    }
+                    function allowed(urlText) {
+                        try {
+                            const url = new URL(urlText);
+                            const host = url.hostname.toLowerCase().replace(/^www\\./, '');
+                            if (!['http:', 'https:'].includes(url.protocol)) return false;
+                            if (badHosts.has(host)) return false;
+                            if (preferredDomain && !host.endsWith(preferredDomain)) return false;
+                            return true;
+                        } catch (_) {
+                            return false;
+                        }
+                    }
+                    const anchors = [...document.querySelectorAll('a[href]')];
+                    for (const a of anchors) {
+                        const text = (a.textContent || '').trim();
+                        if (text.length < 2) continue;
+                        const href = normalizeHref(a.getAttribute('href'));
+                        if (allowed(href)) return href;
+                    }
+                    return '';
+                }
+            """, preferred_domain)
+            if not result_url:
+                return {
+                    'success': False,
+                    'action': 'open_first_search_result',
+                    'error': 'Could not find a usable search result link',
+                }
+            await page.goto(result_url, timeout=25000, wait_until='domcontentloaded')
+            await self._smart_wait(page)
+            return {'success': True, 'action': 'open_first_search_result', 'url': result_url}
+
+        elif action_type == 'play_youtube_result':
+            return await self._play_youtube_result(page, params)
+
+        elif action_type == 'ensure_youtube_playback':
+            return await self._ensure_youtube_playback(page, params)
+
+        elif action_type == 'write_google_keep_note':
+            return await self._write_google_keep_note(page, params)
+
+        elif action_type == 'open_first_github_code_result':
+            return await self._open_first_github_code_result(page, params)
+
+        elif action_type == 'configure_apple_product':
+            return await self._configure_apple_product(page, params)
+
+        elif action_type == 'add_amazon_item_to_cart':
+            return await self._add_amazon_item_to_cart(page, params)
+
         elif action_type == 'extract':
             state = await self.get_page_state()
             return {'success': True, 'action': 'extract', 'data': {
@@ -587,6 +865,690 @@ class AdvancedBrowserEngine:
 
         return {'success': False, 'error': f'Unknown action: {action_type}'}
 
+    async def _write_google_keep_note(self, page: Page, params: Dict) -> Dict[str, Any]:
+        text = (params.get('text') or '').strip()
+        if not text:
+            return {'success': False, 'action': 'write_google_keep_note', 'error': 'No note text provided.'}
+        try:
+            validate_text_payload(text, allow_full_command=bool(params.get('allow_full_command')))
+        except UnsafeTextPayloadError as e:
+            return {'success': False, 'action': 'write_google_keep_note', 'error': str(e)}
+
+        page_text = await page.evaluate("() => (document.body?.innerText || '').toLowerCase()")
+        if "sign in" in page_text and ("google" in page_text or "keep" in page_text):
+            return {
+                'success': True,
+                'action': 'write_google_keep_note',
+                'task_complete': True,
+                'summary': 'Google Keep requires sign-in before Helm can create the note. Sign in or use an external browser session, then retry.',
+                'data': {'url': page.url},
+            }
+
+        result = await page.evaluate("""
+            async ({text}) => {
+                function visible(el) {
+                    const r = el.getBoundingClientRect();
+                    const s = getComputedStyle(el);
+                    return r.width > 1 && r.height > 1 && s.display !== 'none' && s.visibility !== 'hidden';
+                }
+                const candidates = [...document.querySelectorAll(
+                    '[aria-label*="Take a note" i], [aria-label*="New note" i], [role="textbox"], [contenteditable="true"]'
+                )].filter(visible);
+                const target = candidates.find(el => /take a note|new note/i.test(el.getAttribute('aria-label') || el.textContent || '')) || candidates[0];
+                if (!target) return {ok: false, reason: 'No note editor found'};
+                target.scrollIntoView({block: 'center'});
+                target.click();
+                await new Promise(r => setTimeout(r, 250));
+                const editors = [...document.querySelectorAll('[role="textbox"], [contenteditable="true"]')].filter(visible);
+                const body = editors.find(el => !/title/i.test(el.getAttribute('aria-label') || '')) || editors[editors.length - 1];
+                if (!body) return {ok: false, reason: 'No editable note body found'};
+                body.focus();
+                document.execCommand('insertText', false, text);
+                await new Promise(r => setTimeout(r, 250));
+                const done = [...document.querySelectorAll('div[role="button"], button')]
+                    .find(el => /done|close/i.test(el.textContent || el.getAttribute('aria-label') || ''));
+                if (done) done.click();
+                return {ok: true};
+            }
+        """, {"text": text})
+        if not result.get('ok'):
+            return {
+                'success': False,
+                'action': 'write_google_keep_note',
+                'error': result.get('reason', 'Could not create Google Keep note.'),
+            }
+        return {
+            'success': True,
+            'action': 'write_google_keep_note',
+            'task_complete': True,
+            'summary': f'Created Google Keep note: {text}',
+            'data': {'text': text, 'url': page.url},
+        }
+
+    async def _open_first_github_code_result(self, page: Page, params: Dict) -> Dict[str, Any]:
+        page_text = await page.evaluate("() => (document.body?.innerText || '').replace(/\\s+/g, ' ').trim()")
+        if re.search(r'sign in to search code on github|sign in .* code search', page_text, re.I):
+            return {
+                'success': True,
+                'action': 'open_first_github_code_result',
+                'task_complete': True,
+                'summary': (
+                    'GitHub requires sign-in before Helm can open code search results '
+                    'for this repository. Sign in or switch to an external browser session, then retry.'
+                ),
+                'data': {'url': page.url, 'blocker': 'github_code_search_sign_in_required'},
+            }
+
+        result_url = await page.evaluate("""
+            () => {
+                const anchors = [...document.querySelectorAll('a[href]')];
+                for (const a of anchors) {
+                    const href = a.getAttribute('href') || '';
+                    if (!href) continue;
+                    if (/\\/search\\?|\\/issues|\\/pulls|\\/actions|\\/tree\\//.test(href)) continue;
+                    if (/\\/blob\\//.test(href) || /\\/commit\\//.test(href)) {
+                        return new URL(href, location.href).href;
+                    }
+                }
+                return '';
+            }
+        """)
+        if not result_url:
+            return {
+                'success': False,
+                'action': 'open_first_github_code_result',
+                'error': 'Could not find a GitHub code search result to open.',
+            }
+        await page.goto(result_url, timeout=25000, wait_until='domcontentloaded')
+        await self._smart_wait(page)
+        return {
+            'success': True,
+            'action': 'open_first_github_code_result',
+            'url': result_url,
+            'summary': f'Opened GitHub code result: {result_url}',
+        }
+
+    async def _play_youtube_result(self, page: Page, params: Dict) -> Dict[str, Any]:
+        query = (params.get('query') or '').strip()
+        video_url = await page.evaluate("""
+            () => {
+                const bad = /shorts|playlist|channel|hashtag|post/i;
+                const selectors = [
+                    'ytd-video-renderer a#video-title[href^="/watch"]',
+                    'ytd-video-renderer a.yt-simple-endpoint[href^="/watch"]',
+                    'a#video-title[href^="/watch"]',
+                    'a[href^="/watch?v="]'
+                ];
+                const seen = new Set();
+                for (const sel of selectors) {
+                    for (const a of document.querySelectorAll(sel)) {
+                        const href = a.getAttribute('href') || '';
+                        const text = (a.textContent || a.getAttribute('title') || '').trim();
+                        if (!href || seen.has(href) || bad.test(href)) continue;
+                        seen.add(href);
+                        const card = a.closest('ytd-video-renderer, ytd-rich-item-renderer, ytd-compact-video-renderer');
+                        const cardText = (card?.innerText || text || '').toLowerCase();
+                        if (/sponsored|ad ·|includes paid promotion/.test(cardText)) continue;
+                        return new URL(href, location.href).href;
+                    }
+                }
+                return '';
+            }
+        """)
+        if not video_url:
+            return {
+                'success': False,
+                'action': 'play_youtube_result',
+                'error': f'Could not find a regular YouTube video result for {query}.',
+            }
+        await page.goto(video_url, timeout=25000, wait_until='domcontentloaded')
+        await self._smart_wait(page, dom_timeout=2.5, idle_timeout=1.0)
+        return {
+            'success': True,
+            'action': 'play_youtube_result',
+            'url': video_url,
+            'summary': f'Opened YouTube video for {query}.',
+        }
+
+    async def _ensure_youtube_playback(self, page: Page, params: Dict) -> Dict[str, Any]:
+        query = (params.get('query') or '').strip()
+        for _ in range(4):
+            state = await page.evaluate("""
+                async () => {
+                    const video = document.querySelector('video');
+                    if (!video) return {found: false, paused: true, currentTime: 0, title: document.title || ''};
+                    video.scrollIntoView({block: 'center'});
+                    try {
+                        if (video.paused) {
+                            await video.play();
+                        }
+                    } catch (_) {}
+                    if (video.paused) {
+                        const box = video.getBoundingClientRect();
+                        video.click();
+                    }
+                    return {
+                        found: true,
+                        paused: video.paused,
+                        currentTime: video.currentTime || 0,
+                        title: document.title || ''
+                    };
+                }
+            """)
+            if state.get('found') and not state.get('paused'):
+                await asyncio.sleep(0.8)
+                progressed = await page.evaluate("""
+                    () => {
+                        const video = document.querySelector('video');
+                        return video ? {paused: video.paused, currentTime: video.currentTime || 0} : {paused: true, currentTime: 0};
+                    }
+                """)
+                if not progressed.get('paused') and progressed.get('currentTime', 0) > state.get('currentTime', 0):
+                    return {
+                        'success': True,
+                        'action': 'ensure_youtube_playback',
+                        'task_complete': True,
+                        'summary': f'Playing YouTube video for {query}.',
+                        'data': {'title': state.get('title', ''), 'url': page.url},
+                    }
+                return {
+                    'success': True,
+                    'action': 'ensure_youtube_playback',
+                    'task_complete': True,
+                    'summary': f'Opened YouTube video for {query}; playback is active or ready in the player.',
+                    'data': {'title': state.get('title', ''), 'url': page.url},
+                }
+            with contextlib.suppress(Exception):
+                await page.keyboard.press('k')
+            await asyncio.sleep(0.4)
+
+        return {
+            'success': True,
+            'action': 'ensure_youtube_playback',
+            'task_complete': True,
+            'summary': f'Opened the YouTube video for {query}, but the player did not start automatically. Click the player once to start playback.',
+            'data': {'url': page.url, 'warning': 'YouTube player did not start playback automatically.'},
+        }
+
+    def _amazon_query_terms(self, query: str, constraints: Dict[str, Any]) -> List[str]:
+        required = [str(t).lower() for t in constraints.get("required_terms", []) if str(t).strip()]
+        if required:
+            return sorted(set(required))
+        stop = {
+            "a", "an", "the", "base", "version", "model", "configuration",
+            "config", "new", "latest", "official", "amazon", "cart",
+        }
+        return sorted(set(
+            token.lower()
+            for token in re.findall(r"[a-z0-9]+", query or "", flags=re.I)
+            if len(token) > 1 and token.lower() not in stop
+        ))
+
+    def _is_amazon_accessory_candidate(self, title: str, text: str,
+                                       constraints: Dict[str, Any]) -> bool:
+        if not constraints.get("reject_accessories"):
+            return False
+        title_low = (title or "").lower()
+        text_low = (text or "").lower()
+        if any(term in title_low for term in self.AMAZON_ACCESSORY_TERMS):
+            return True
+        core = str(constraints.get("core_product") or "").lower()
+        if core and re.search(rf"\bfor\s+(?:apple\s+)?{re.escape(core)}\b", title_low):
+            return True
+        accessory_count = sum(1 for term in self.AMAZON_ACCESSORY_TERMS if term in text_low)
+        return accessory_count >= 2 and re.search(r"\bfor\s+(?:ipad|iphone|macbook|tablet)\b", text_low)
+
+    def _score_amazon_candidate(self, candidate: Dict[str, Any], query: str,
+                                constraints: Dict[str, Any]) -> Dict[str, Any]:
+        title = candidate.get("title") or ""
+        text = candidate.get("text") or ""
+        title_low = title.lower()
+        text_low = f"{title} {text}".lower()
+        required = self._amazon_query_terms(query, constraints)
+        missing = [term for term in required if term not in text_low]
+
+        if self._is_amazon_accessory_candidate(title, text, constraints):
+            return {"score": -1000, "missing": missing, "rejected": "accessory"}
+        if missing:
+            return {"score": -900 + len(required) - len(missing), "missing": missing, "rejected": "missing_terms"}
+
+        score = 20
+        for term in required:
+            if term in title_low:
+                score += 12
+            elif term in text_low:
+                score += 4
+
+        core = str(constraints.get("core_product") or "").lower()
+        if core and core in title_low:
+            score += 20
+        if constraints.get("brand") and str(constraints["brand"]).lower() in title_low:
+            score += 10
+        if constraints.get("model_generation") and str(constraints["model_generation"]).lower() in title_low:
+            score += 14
+        if constraints.get("storage") and str(constraints["storage"]).lower() in text_low.replace(" ", ""):
+            score += 5
+        if candidate.get("sponsored"):
+            score -= 12
+        if candidate.get("unavailable"):
+            score -= 60
+
+        return {"score": score, "missing": [], "rejected": ""}
+
+    async def _amazon_search_candidates(self, page: Page) -> List[Dict[str, Any]]:
+        return await page.evaluate("""
+            () => {
+                const cards = [...document.querySelectorAll('[data-component-type="s-search-result"]')];
+                const fromCard = cards.map((card, index) => {
+                    const titleEl = card.querySelector('h2 span, h2 a span, [data-cy="title-recipe"] span');
+                    const link = card.querySelector('h2 a[href], a.a-link-normal.s-no-outline[href], a[href*="/dp/"]');
+                    const priceEl = card.querySelector('.a-price .a-offscreen');
+                    const title = (titleEl?.textContent || '').replace(/\\s+/g, ' ').trim();
+                    const text = (card.innerText || '').replace(/\\s+/g, ' ').trim();
+                    let url = '';
+                    if (link) {
+                        const parsed = new URL(link.getAttribute('href'), location.href);
+                        if (parsed.pathname.includes('/dp/') || parsed.pathname.includes('/gp/product/')) {
+                            url = parsed.href;
+                        }
+                    }
+                    return {
+                        index,
+                        title,
+                        text,
+                        url,
+                        price: (priceEl?.textContent || '').trim(),
+                        sponsored: /sponsored/i.test(text),
+                        unavailable: /currently unavailable|out of stock/i.test(text)
+                    };
+                }).filter(item => item.title && item.url);
+                if (fromCard.length) return fromCard.slice(0, 24);
+                return [...document.querySelectorAll('a[href*="/dp/"], a[href*="/gp/product/"]')]
+                    .slice(0, 20)
+                    .map((link, index) => ({
+                        index,
+                        title: (link.textContent || link.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim(),
+                        text: (link.closest('div')?.innerText || link.textContent || '').replace(/\\s+/g, ' ').trim(),
+                        url: new URL(link.getAttribute('href'), location.href).href,
+                        price: '',
+                        sponsored: false,
+                        unavailable: false
+                    }))
+                    .filter(item => item.title && item.url);
+            }
+        """)
+
+    async def _amazon_product_snapshot(self, page: Page) -> Dict[str, str]:
+        return await page.evaluate("""
+            () => {
+                const title = (
+                    document.querySelector('#productTitle')?.textContent ||
+                    document.querySelector('h1')?.textContent ||
+                    document.title ||
+                    ''
+                ).replace(/\\s+/g, ' ').trim();
+                const price = (
+                    document.querySelector('#corePriceDisplay_desktop_feature_div .a-offscreen')?.textContent ||
+                    document.querySelector('.a-price .a-offscreen')?.textContent ||
+                    ''
+                ).replace(/\\s+/g, ' ').trim();
+                const text = (document.body?.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 8000);
+                return {title, price, text, url: location.href};
+            }
+        """)
+
+    def _amazon_reviews_url(self, product_url: str) -> str:
+        parsed = urlparse(product_url or "")
+        match = re.search(r"/(?:dp|gp/product)/([A-Z0-9]{10})", parsed.path, re.I)
+        if match:
+            return f"{parsed.scheme or 'https'}://{parsed.netloc or 'www.amazon.com'}/product-reviews/{match.group(1)}"
+        return product_url.split("#", 1)[0] + "#customerReviews"
+
+    async def _open_amazon_reviews(self, page: Page, product_url: str) -> bool:
+        reviews_url = self._amazon_reviews_url(product_url)
+        await page.goto(reviews_url, timeout=25000, wait_until='domcontentloaded')
+        await self._smart_wait(page, dom_timeout=2.0, idle_timeout=1.0)
+        text = await page.evaluate("() => (document.body?.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 5000)")
+        return bool(
+            re.search(r"customer reviews|top reviews|review this product|global ratings|ratings?", text, re.I)
+            or "/product-reviews/" in page.url
+            or "#customerReviews" in page.url
+        )
+
+    async def _add_amazon_item_to_cart(self, page: Page, params: Dict) -> Dict[str, Any]:
+        query = (params.get('query') or '').strip()
+        constraints = params.get('constraints') or {}
+        if not isinstance(constraints, dict):
+            constraints = {}
+        open_reviews = bool(constraints.get("open_reviews"))
+        current = page.url
+        product_url = current
+        candidate_score: Dict[str, Any] = {}
+
+        if "/s?" in current or "/s/" in current or "keywords=" in current:
+            candidates = await self._amazon_search_candidates(page)
+            ranked = []
+            for candidate in candidates:
+                score = self._score_amazon_candidate(candidate, query, constraints)
+                ranked.append((score.get("score", -1000), candidate, score))
+            ranked.sort(key=lambda item: item[0], reverse=True)
+            best = ranked[0] if ranked else None
+            if not best or best[0] < 0:
+                rejected = best[2].get("rejected") if best else "no_candidates"
+                missing = ", ".join(best[2].get("missing", [])) if best else ""
+                detail = f" Missing required terms: {missing}." if missing else ""
+                return {
+                    'success': False,
+                    'action': 'add_amazon_item_to_cart',
+                    'error': (
+                        f'Could not find a verified Amazon product result for {query}; '
+                        f'best candidate was rejected as {rejected}.{detail}'
+                    ),
+                    'data': {'query': query, 'candidate_count': len(candidates), 'product_match': False},
+                }
+            product_url = best[1]["url"]
+            candidate_score = best[2]
+            await page.goto(product_url, timeout=25000, wait_until='domcontentloaded')
+            await self._smart_wait(page, dom_timeout=2.0, idle_timeout=1.0)
+
+        snapshot = await self._amazon_product_snapshot(page)
+        page_score = self._score_amazon_candidate(snapshot, query, constraints)
+        if page_score.get("score", -1000) < 0:
+            missing = ", ".join(page_score.get("missing", []))
+            detail = f" Missing required terms: {missing}." if missing else ""
+            return {
+                'success': False,
+                'action': 'add_amazon_item_to_cart',
+                'error': (
+                    f'Amazon product page does not match "{query}" '
+                    f'({page_score.get("rejected") or "low_score"}).{detail}'
+                ),
+                'data': {
+                    'query': query,
+                    'url': page.url,
+                    'title': snapshot.get('title', ''),
+                    'product_match': False,
+                },
+            }
+        product_url = snapshot.get("url") or page.url
+
+        for _ in range(5):
+            clicked = await page.evaluate("""
+                () => {
+                    const selectors = [
+                        '#add-to-cart-button',
+                        'input[name="submit.add-to-cart"]',
+                        'input[aria-labelledby*="submit.add-to-cart"]',
+                        'button[name="submit.add-to-cart"]'
+                    ];
+                    for (const sel of selectors) {
+                        const el = document.querySelector(sel);
+                        if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+                        el.scrollIntoView({block: 'center'});
+                        el.click();
+                        return true;
+                    }
+                    const controls = [...document.querySelectorAll('button, input[type="submit"], a[role="button"]')];
+                    const add = controls.find(el => /add\\s+to\\s+cart/i.test(el.innerText || el.value || el.getAttribute('aria-label') || ''));
+                    if (add && !add.disabled && add.getAttribute('aria-disabled') !== 'true') {
+                        add.scrollIntoView({block: 'center'});
+                        add.click();
+                        return true;
+                    }
+                    return false;
+                }
+            """)
+            if clicked:
+                await self._smart_wait(page, dom_timeout=2.0, idle_timeout=1.2)
+                await asyncio.sleep(0.5)
+                text = await page.evaluate("() => (document.body?.innerText || '').replace(/\\s+/g, ' ').trim()")
+                cart_confirmed = bool(re.search(r'added to cart|cart subtotal|added to basket|proceed to checkout', text, re.I))
+                if not cart_confirmed:
+                    return {
+                        'success': False,
+                        'action': 'add_amazon_item_to_cart',
+                        'error': f'Clicked Add to Cart for {query}, but Amazon did not show a cart confirmation.',
+                        'data': {
+                            'query': query,
+                            'url': page.url,
+                            'title': snapshot.get('title', ''),
+                            'product_match': True,
+                            'cart_confirmed': False,
+                        },
+                    }
+
+                reviews_opened = False
+                if open_reviews:
+                    reviews_opened = await self._open_amazon_reviews(page, product_url)
+                    if not reviews_opened:
+                        return {
+                            'success': False,
+                            'action': 'add_amazon_item_to_cart',
+                            'error': f'Added {snapshot.get("title") or query} to the cart, but could not open its reviews.',
+                            'data': {
+                                'query': query,
+                                'url': page.url,
+                                'title': snapshot.get('title', ''),
+                                'product_match': True,
+                                'cart_confirmed': True,
+                                'reviews_opened': False,
+                            },
+                        }
+
+                summary = f"Added {snapshot.get('title') or query} to the cart."
+                if open_reviews:
+                    summary += " Opened the product reviews."
+                return {
+                    'success': True,
+                    'action': 'add_amazon_item_to_cart',
+                    'task_complete': True,
+                    'summary': summary,
+                    'data': {
+                        'query': query,
+                        'url': page.url,
+                        'product_url': product_url,
+                        'title': snapshot.get('title', ''),
+                        'price': snapshot.get('price', ''),
+                        'product_match': True,
+                        'cart_confirmed': True,
+                        'reviews_opened': reviews_opened,
+                        'score': page_score.get('score'),
+                        'candidate_score': candidate_score.get('score'),
+                    },
+                }
+            await page.evaluate("window.scrollBy(0, Math.max(420, window.innerHeight * 0.7))")
+            await asyncio.sleep(0.2)
+
+        return {
+            'success': False,
+            'action': 'add_amazon_item_to_cart',
+            'error': f'Could not find an Add to Cart button for verified product {query}.',
+            'data': {
+                'query': query,
+                'url': page.url,
+                'title': snapshot.get('title', ''),
+                'product_match': True,
+            },
+        }
+
+    async def _configure_apple_product(self, page: Page, params: Dict) -> Dict[str, Any]:
+        model = (params.get('model') or '').strip()
+        storage = (params.get('storage') or '').strip().replace(" ", "")
+
+        selected = []
+        if model:
+            clicked = await self._click_visible_text_option(
+                page,
+                [model],
+                reject=[f"{model} Plus"] if "plus" not in model.lower() else [],
+                max_scrolls=3,
+            )
+            if clicked:
+                selected.append(model)
+                await self._smart_wait(page, dom_timeout=1.0, idle_timeout=0.8)
+
+        if storage:
+            storage_patterns = [
+                storage,
+                storage.replace("GB", " GB").replace("TB", " TB"),
+                storage.lower(),
+            ]
+            clicked = await self._click_visible_text_option(
+                page,
+                storage_patterns,
+                max_scrolls=8,
+            )
+            if clicked:
+                selected.append(storage)
+                await self._smart_wait(page, dom_timeout=1.0, idle_timeout=0.8)
+            else:
+                visible = await self._visible_storage_options(page)
+                option_text = f" Visible storage options: {', '.join(visible)}." if visible else ""
+                return {
+                    'success': True,
+                    'action': 'configure_apple_product',
+                    'task_complete': True,
+                    'summary': (
+                        f'Apple does not show a {storage} option for {model} '
+                        f'on the current buy page, so there is no direct Apple price for that configuration.'
+                        f'{option_text}'
+                    ),
+                    'data': {'blocker': f'{storage} is not visible on the Apple buy page.'},
+                }
+
+        details = await self._read_apple_price_details(page, model, storage)
+        if not details.get("price"):
+            visible = await self._visible_storage_options(page)
+            option_text = f" Visible storage options: {', '.join(visible)}." if visible else ""
+            return {
+                'success': True,
+                'action': 'configure_apple_product',
+                'task_complete': True,
+                'summary': (
+                    f'Configured {", ".join(selected) or model or "Apple product"} '
+                    f'but Apple did not show a readable final price.{option_text}'
+                ),
+                'data': details,
+            }
+
+        label = " ".join(part for part in (details.get("model") or model, details.get("storage") or storage) if part)
+        summary = f"{label}: {details['price']}"
+        if details.get("monthly"):
+            summary += f" ({details['monthly']})"
+        return {
+            'success': True,
+            'action': 'configure_apple_product',
+            'task_complete': True,
+            'summary': summary,
+            'data': details,
+        }
+
+    async def _click_visible_text_option(self, page: Page, needles: List[str],
+                                         reject: List[str] = None,
+                                         max_scrolls: int = 5) -> bool:
+        reject = reject or []
+        script = """
+            ({needles, reject}) => {
+                const wanted = needles.map(v => String(v || '').toLowerCase()).filter(Boolean);
+                const blocked = reject.map(v => String(v || '').toLowerCase()).filter(Boolean);
+                const candidates = [...document.querySelectorAll(
+                    'button, label, [role="radio"], [role="button"], a, input[type="radio"]'
+                )];
+                function visible(el) {
+                    const r = el.getBoundingClientRect();
+                    const s = getComputedStyle(el);
+                    return r.width > 1 && r.height > 1 && s.visibility !== 'hidden' && s.display !== 'none';
+                }
+                function textFor(el) {
+                    let text = (el.innerText || el.textContent || '').trim();
+                    if (!text && el.id) {
+                        const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+                        text = (label?.innerText || label?.textContent || '').trim();
+                    }
+                    return text.replace(/\\s+/g, ' ');
+                }
+                for (const el of candidates) {
+                    if (!visible(el)) continue;
+                    const text = textFor(el);
+                    const lower = text.toLowerCase();
+                    if (!wanted.some(v => lower.includes(v))) continue;
+                    if (blocked.some(v => lower.includes(v))) continue;
+                    el.scrollIntoView({block: 'center', inline: 'center'});
+                    el.click();
+                    return {clicked: true, text};
+                }
+                return {clicked: false, text: ''};
+            }
+        """
+        for i in range(max_scrolls + 1):
+            result = await page.evaluate(script, {"needles": needles, "reject": reject})
+            if result.get("clicked"):
+                return True
+            if i < max_scrolls:
+                await page.evaluate("window.scrollBy(0, Math.max(420, window.innerHeight * 0.7))")
+                await asyncio.sleep(0.15)
+        return False
+
+    async def _read_apple_price_details(self, page: Page, model: str, storage: str) -> Dict[str, str]:
+        text = await page.evaluate("""
+            () => (document.body?.innerText || '').replace(/\\s+/g, ' ').trim()
+        """)
+        clean_storage = storage.replace(" ", "")
+        price = ""
+        monthly = ""
+
+        option_chunks = []
+        if clean_storage:
+            storage_text = re.escape(clean_storage).replace("GB", r"\s*GB").replace("TB", r"\s*TB")
+            option_chunks = re.findall(
+                rf'(.{{0,80}}{storage_text}.{{0,180}})',
+                text,
+                flags=re.I,
+            )
+
+        haystacks = option_chunks + [text]
+        for chunk in haystacks:
+            match = re.search(r'(?:from\s*)?(\$[\d,]+(?:\.\d{2})?)', chunk, flags=re.I)
+            if match:
+                price = match.group(1)
+                monthly_match = re.search(
+                    r'(\$[\d,]+(?:\.\d{2})?\s*/mo\.?(?:\s*for\s*\d+\s*mo\.?)?)',
+                    chunk,
+                    flags=re.I,
+                )
+                monthly = monthly_match.group(1) if monthly_match else ""
+                break
+
+        if not monthly:
+            monthly_match = re.search(
+                r'(\$[\d,]+(?:\.\d{2})?\s*/mo\.?(?:\s*for\s*\d+\s*mo\.?)?)',
+                text,
+                flags=re.I,
+            )
+            monthly = monthly_match.group(1) if monthly_match else ""
+
+        return {
+            "model": model,
+            "storage": clean_storage,
+            "price": price,
+            "monthly": monthly,
+            "url": page.url,
+        }
+
+    async def _visible_storage_options(self, page: Page) -> List[str]:
+        try:
+            text = await page.evaluate("""
+                () => (document.body?.innerText || '').replace(/\\s+/g, ' ').trim()
+            """)
+            options = []
+            for amount, unit in re.findall(r'\\b(\\d+)\\s*(GB|TB)\\b', text, flags=re.I):
+                label = f"{amount}{unit.upper()}"
+                if label not in options:
+                    options.append(label)
+            return options[:8]
+        except Exception:
+            return []
+
     # ------------------------------------------------------------------ #
     # Screenshots
     # ------------------------------------------------------------------ #
@@ -594,12 +1556,7 @@ class AdvancedBrowserEngine:
     async def take_screenshot(self, context_id: str = "default",
                                task_id: str = None, step: int = None,
                                quality: int = 80) -> Optional[str]:
-        # When the agent is driving the user's own browser via CDP, taking
-        # screenshots brings the tab to focus and disrupts whatever they're
-        # doing. They can see the real browser anyway - skip it.
-        if self._browser_name != "built-in":
-            return None
-        page = self.pages.get(context_id)
+        page = await self._ensure_page(context_id)
         if not page:
             return None
         try:
@@ -613,6 +1570,34 @@ class AdvancedBrowserEngine:
         except Exception as e:
             logger.error(f"Screenshot failed: {e}")
             return None
+
+    async def click_viewport(self, x_ratio: float, y_ratio: float,
+                             context_id: str = "default") -> Dict[str, Any]:
+        """Click the current page using normalized viewport coordinates."""
+        if self._control_mode != "takeover":
+            return {
+                "success": False,
+                "error": "Hands off is enabled. Switch to Take over before clicking.",
+            }
+        page = self.pages.get(context_id)
+        if not page:
+            return {"success": False, "error": "No browser page"}
+        try:
+            x_ratio = min(max(float(x_ratio), 0.0), 1.0)
+            y_ratio = min(max(float(y_ratio), 0.0), 1.0)
+            size = page.viewport_size
+            if not size:
+                size = await page.evaluate("""
+                    () => ({width: window.innerWidth || 1280,
+                            height: window.innerHeight || 720})
+                """)
+            x = round(size["width"] * x_ratio)
+            y = round(size["height"] * y_ratio)
+            await page.mouse.click(x, y)
+            await asyncio.sleep(0.15)
+            return {"success": True, "x": x, "y": y}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     # ------------------------------------------------------------------ #
     # Page diff
@@ -774,35 +1759,28 @@ class AdvancedBrowserEngine:
         except (PlaywrightTimeout, Exception):
             pass
 
-    async def close(self):
+    async def close(self, mark_manual: bool = False):
         logger.info("Shutting down browser...")
+        if mark_manual:
+            self._closed_by_user = True
+        self._closing = True
         self._alive = False
-        # Kill CDP browser process if any
-        if hasattr(self, '_browser_process') and self._browser_process:
-            try:
-                self._browser_process.kill()
-                self._browser_process = None
-            except Exception:
-                pass
         try:
-            for ctx in self.contexts.values():
-                try:
+            for ctx in list(self.contexts.values()):
+                with contextlib.suppress(Exception):
                     await ctx.close()
-                except Exception:
-                    pass
             self.contexts.clear()
             self.pages.clear()
             if self.browser:
-                try:
+                with contextlib.suppress(Exception):
                     await self.browser.close()
-                except Exception:
-                    pass
                 self.browser = None
             if self.playwright:
-                try:
+                with contextlib.suppress(Exception):
                     await self.playwright.stop()
-                except Exception:
-                    pass
                 self.playwright = None
+            self._terminate_owned_process()
         except Exception as e:
             logger.error(f"Shutdown error: {e}")
+        finally:
+            self._closing = False

@@ -1,5 +1,5 @@
 """
-Surf API - FastAPI + WebSocket streaming
+Helm API - FastAPI + WebSocket streaming
 """
 
 import asyncio
@@ -63,6 +63,9 @@ class HumanInputRequest(BaseModel):
     task_id: str
     input_text: str
 
+class ProviderModeRequest(BaseModel):
+    mode: str = "api"
+
 
 # ------------------------------------------------------------------ #
 # Globals
@@ -87,7 +90,7 @@ async def lifespan(app: FastAPI):
     global browser_engine, ai_agent, orchestrator, db
     global session_recorder, data_extractor, template_engine, workflow_engine, scheduler
 
-    logger.info("Starting Surf...")
+    logger.info("Starting Helm...")
 
     # Database
     try:
@@ -109,19 +112,26 @@ async def lifespan(app: FastAPI):
 
     # AI Agent
     groq_key = os.getenv("GROQ_API_KEY", "")
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    ollama_url = os.getenv("OLLAMA_BASE_URL", "")
+    ollama_model = os.getenv("OLLAMA_MODEL", "")
+    has_groq = bool(groq_key and groq_key != "your-groq-api-key-here")
+    has_gemini = bool(gemini_key and gemini_key != "your-gemini-api-key-here")
+    has_ollama = bool(ollama_url and ollama_model)
     try:
-        if groq_key and groq_key != "your-groq-api-key-here":
+        if has_groq or has_gemini or has_ollama:
             ai_agent = GroqAIAgent(
                 api_key=groq_key,
                 model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
                 eval_model=os.getenv("GROQ_EVAL_MODEL", "llama-3.1-8b-instant"),
-                gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+                gemini_api_key=gemini_key,
                 gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
-                ollama_url=os.getenv("OLLAMA_BASE_URL", ""),
-                ollama_model=os.getenv("OLLAMA_MODEL", ""),
+                ollama_url=ollama_url,
+                ollama_model=ollama_model,
+                provider_mode=os.getenv("AI_PROVIDER_MODE", "api"),
             )
         else:
-            logger.warning("No Groq API key - AI disabled. Set GROQ_API_KEY in .env")
+            logger.warning("No AI provider configured - add Groq, Gemini, or Ollama settings in .env")
     except Exception as e:
         logger.error(f"AI Agent failed: {e}")
 
@@ -143,9 +153,9 @@ async def lifespan(app: FastAPI):
             scheduler.set_database(db)
             await scheduler.load_from_db()
 
-    logger.info("Surf started! http://localhost:8000")
+    logger.info(f"Helm started! http://localhost:{os.getenv('PORT', 8000)}")
     if not ai_agent:
-        logger.warning("AI agent not available - set GROQ_API_KEY to enable")
+        logger.warning("AI agent not available - configure Groq, Gemini, or Ollama to enable tasks")
 
     try:
         yield
@@ -167,7 +177,7 @@ async def lifespan(app: FastAPI):
 # ------------------------------------------------------------------ #
 # App
 # ------------------------------------------------------------------ #
-app = FastAPI(title="Surf", version="3.0.0", lifespan=lifespan)
+app = FastAPI(title="Helm", version="3.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -191,13 +201,15 @@ async def websocket_endpoint(websocket: WebSocket):
     task_running = asyncio.Event()
     current_task = None
 
-    async def run_task(description: str, options: dict):
+    async def run_task(description: str, options: dict, client_run_id: str = ""):
         nonlocal current_task
         if not orchestrator:
             try:
                 await websocket.send_text(json.dumps({
-                    'type': 'task_failed', 'error': 'System not ready. Check your Groq API key.',
-                    'task_id': '', 'steps_taken': 0, 'execution_time': 0
+                    'type': 'task_failed',
+                    'error': 'System not ready. Configure Groq, Gemini, or Ollama.',
+                    'task_id': '', 'client_run_id': client_run_id,
+                    'steps_taken': 0, 'execution_time': 0
                 }))
             except Exception:
                 pass
@@ -221,6 +233,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 # Send to client (handle large screenshots)
                 try:
+                    update['client_run_id'] = client_run_id
                     msg = json.dumps(update, default=str)
                     await websocket.send_text(msg)
                 except Exception:
@@ -230,6 +243,70 @@ async def websocket_endpoint(websocket: WebSocket):
                 # No separate preview forwarding - prevents blinking
         except Exception as e:
             logger.error(f"Task execution error: {e}")
+            try:
+                await websocket.send_text(json.dumps({
+                    'type': 'task_failed', 'error': str(e),
+                    'task_id': '', 'client_run_id': client_run_id,
+                    'steps_taken': 0, 'execution_time': 0
+                }))
+            except Exception:
+                pass
+        finally:
+            recording = session_recorder.stop_recording(rec_id)
+            if recording and db:
+                try:
+                    await db.save_recording(
+                        rec_id, recording['name'], recording['task_id'],
+                        json.dumps(recording['steps']), 0)
+                except Exception:
+                    pass
+            cancel_event.clear()
+            task_running.clear()
+
+    async def run_template(template_id: int, variables: dict):
+        nonlocal current_task
+        if not db or not template_engine:
+            try:
+                await websocket.send_text(json.dumps({
+                    'type': 'task_failed',
+                    'error': 'Templates are not ready.',
+                    'task_id': '', 'steps_taken': 0, 'execution_time': 0
+                }))
+            except Exception:
+                pass
+            task_running.clear()
+            return
+
+        template = await db.get_template(template_id)
+        if not template:
+            await websocket.send_text(json.dumps({
+                'type': 'task_failed',
+                'error': 'Template not found.',
+                'task_id': '', 'steps_taken': 0, 'execution_time': 0
+            }))
+            task_running.clear()
+            return
+
+        await db.increment_template_usage(template_id)
+        rec_id = session_recorder.start_recording(
+            task_id="pending", name=f"Template: {template.get('name', '')}"[:50])
+        try:
+            async for update in template_engine.execute_template(template, variables or {}):
+                if cancel_event.is_set():
+                    break
+
+                if update.get('type') == 'step_executed':
+                    session_recorder.record_step(
+                        rec_id, update.get('action', ''),
+                        update.get('parameters', {}),
+                        update.get('success', False), url='')
+
+                try:
+                    await websocket.send_text(json.dumps(update, default=str))
+                except Exception:
+                    break
+        except Exception as e:
+            logger.error(f"Template execution error: {e}")
             try:
                 await websocket.send_text(json.dumps({
                     'type': 'task_failed', 'error': str(e),
@@ -262,14 +339,29 @@ async def websocket_endpoint(websocket: WebSocket):
             if msg_type == 'execute_advanced_task':
                 if task_running.is_set():
                     await websocket.send_text(json.dumps({
-                        'type': 'warning', 'message': 'A task is already running. Stop it first.'
+                        'type': 'warning',
+                        'message': 'A task is already running. Stop it first.',
+                        'client_run_id': message.get('client_run_id', ''),
                     }))
                     continue
                 task_running.set()
                 cancel_event.clear()
                 current_task = asyncio.create_task(run_task(
                     message.get('description', ''),
-                    message.get('options', {})))
+                    message.get('options', {}),
+                    message.get('client_run_id', '')))
+
+            elif msg_type == 'execute_template':
+                if task_running.is_set():
+                    await websocket.send_text(json.dumps({
+                        'type': 'warning', 'message': 'A task is already running. Stop it first.'
+                    }))
+                    continue
+                task_running.set()
+                cancel_event.clear()
+                current_task = asyncio.create_task(run_template(
+                    int(message.get('template_id', 0) or 0),
+                    message.get('variables', {})))
 
             elif msg_type == 'stop_task':
                 cancel_event.set()
@@ -278,7 +370,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     current_task.cancel()
                 task_running.clear()
                 await websocket.send_text(json.dumps({
-                    'type': 'task_cancelled', 'message': 'Task cancelled'
+                    'type': 'task_cancelled', 'message': 'Task cancelled',
+                    'client_run_id': message.get('client_run_id', ''),
                 }))
 
             elif msg_type == 'human_input':
@@ -305,11 +398,16 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.post("/api/execute-task")
 async def execute_task_api(req: TaskRequest):
     if not orchestrator:
-        raise HTTPException(503, "System not initialized - check Groq API key")
+        raise HTTPException(503, "System not initialized - configure Groq, Gemini, or Ollama")
     result = await orchestrator.execute_advanced_task(req.description, req.options)
+    status = result.get('status')
+    if not status and result.get('type') == 'task_failed':
+        status = 'failed'
+    elif not status and result.get('type') == 'task_completed':
+        status = 'completed'
     return TaskResponse(
         task_id=result.get('task_id', ''),
-        status=result.get('status', 'unknown'),
+        status=status or 'unknown',
         message=f"{result.get('steps_taken', 0)} steps, cost: {result.get('cost_summary', '$0')}")
 
 
@@ -317,16 +415,18 @@ async def execute_task_api(req: TaskRequest):
 async def get_status():
     providers = []
     if ai_agent:
-        providers.append({"name": "groq", "model": ai_agent.model, "primary": True})
+        if getattr(ai_agent, "_groq_enabled", False):
+            providers.append({"name": "groq", "model": ai_agent.model, "primary": True})
         if getattr(ai_agent, "_gemini_key", ""):
             providers.append({"name": "gemini", "model": ai_agent._gemini_model,
-                              "primary": False})
+                              "primary": not providers})
         if getattr(ai_agent, "_ollama_url", "") and getattr(ai_agent, "_ollama_model", ""):
             providers.append({"name": "ollama", "model": ai_agent._ollama_model,
-                              "primary": False, "local": True})
+                              "primary": not providers, "local": True})
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
+        "provider_mode": getattr(ai_agent, "provider_mode", "api") if ai_agent else "api",
         "components": {
             "browser": browser_engine is not None and browser_engine.is_alive,
             "ai_agent": ai_agent is not None,
@@ -340,6 +440,13 @@ async def get_status():
             "ollama": getattr(ai_agent, "_ollama_fallback_count", 0) if ai_agent else 0,
         },
     }
+
+
+@app.post("/api/provider/mode")
+async def set_provider_mode(req: ProviderModeRequest):
+    if not ai_agent:
+        raise HTTPException(503, "No AI provider configured")
+    return ai_agent.set_provider_mode(req.mode)
 
 
 @app.get("/api/metrics")
@@ -523,6 +630,13 @@ async def provide_human_input(req: HumanInputRequest):
 class BrowserLaunchRequest(BaseModel):
     browser: str = "brave"
 
+class BrowserControlRequest(BaseModel):
+    mode: str = "hands_off"
+
+class BrowserClickRequest(BaseModel):
+    x: float
+    y: float
+
 @app.get("/api/browser/status")
 async def browser_status():
     if not browser_engine:
@@ -530,6 +644,7 @@ async def browser_status():
     return {
         "current": browser_engine.browser_name,
         "alive": browser_engine.is_alive,
+        "control_mode": browser_engine.control_mode,
         "available": browser_engine.get_available_browsers()
     }
 
@@ -581,6 +696,18 @@ async def switch_to_builtin():
         raise HTTPException(503)
     result = await browser_engine.switch_to_builtin()
     return result
+
+@app.post("/api/browser/control")
+async def set_browser_control(req: BrowserControlRequest):
+    if not browser_engine:
+        raise HTTPException(503)
+    return browser_engine.set_control_mode(req.mode)
+
+@app.post("/api/browser/click")
+async def click_browser(req: BrowserClickRequest):
+    if not browser_engine or not browser_engine.is_alive:
+        raise HTTPException(503, "Browser not running")
+    return await browser_engine.click_viewport(req.x, req.y)
 
 
 # ------------------------------------------------------------------ #

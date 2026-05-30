@@ -5,15 +5,19 @@ plan -> execute -> evaluate -> adapt -> repeat
 
 import asyncio
 import json
+import re
 import time
 import logging
 import uuid
-from typing import Dict, List, Any, Optional, AsyncGenerator
+from typing import Dict, List, Any, Optional, AsyncGenerator, Tuple
 from datetime import datetime
 from enum import Enum
 
 from .ai_agent import GroqAIAgent, ActionPlan, ActionType
 from .browser_engine import AdvancedBrowserEngine, PageState
+from . import blockers as blocker_mod
+from . import validators as validators_mod
+from . import risk as risk_layer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,6 +29,8 @@ class TaskStatus(Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    BLOCKED = "blocked"        # stopped on a precise, often-recoverable blocker
+    UNVERIFIED = "unverified"  # did work but could not prove completion
 
 
 class AdvancedTask:
@@ -44,10 +50,15 @@ class AdvancedTask:
             'human_inputs': [],
         }
         self.current_page_state: Optional[PageState] = None
-        self.max_steps = options.get('max_steps', 25)
+        self.max_steps = options.get('max_steps', 8)
         self.context_id = options.get('context_id', 'default')
         self.total_cost = 0.0
         self.result_summary = ""
+        # Structured intent (set at task start) and terminal blocker (set when
+        # the run cannot complete). Both feed the WebSocket/DB contract.
+        self.intent: Optional[Dict] = None
+        self.blocker: Optional[Dict] = None
+        self.validation: Optional[Dict] = None
 
 
 class SophisticatedTaskOrchestrator:
@@ -64,8 +75,21 @@ class SophisticatedTaskOrchestrator:
         self._db = None
         self._preview_callbacks: List = []
         # Serializes access to the single shared browser across task runs,
-        # template runs, workflow runs, and scheduled runs.
-        self._run_lock = asyncio.Lock()
+        # template runs, workflow runs, and scheduled runs. Created lazily on
+        # first use so the lock binds to the running event loop (and so the
+        # orchestrator can be constructed outside a loop, e.g. in tests).
+        self._run_lock: Optional[asyncio.Lock] = None
+
+    def _ensure_run_lock(self) -> asyncio.Lock:
+        """Lazily create the shared run lock bound to the active event loop.
+
+        Callers (task stream, templates, workflows) use this so the lock is
+        always present once any browser-driving work begins, regardless of
+        whether the orchestrator was constructed inside a running loop.
+        """
+        if self._run_lock is None:
+            self._run_lock = asyncio.Lock()
+        return self._run_lock
 
     def set_database(self, db):
         self._db = db
@@ -87,6 +111,9 @@ class SophisticatedTaskOrchestrator:
 
         if cancel_event:
             self._cancel_events[task_id] = cancel_event
+
+        # Bind the run lock to the active event loop on first use.
+        self._ensure_run_lock()
 
         # Wait our turn on the shared browser. If the caller cancels while
         # we're queued, bail out cleanly without ever marking EXECUTING.
@@ -126,6 +153,21 @@ class SophisticatedTaskOrchestrator:
             page_state = await self.browser.get_page_state(task.context_id)
             task.current_page_state = page_state
 
+            # -- Build structured intent up front. Requirement: every task must
+            #    have a success condition before execution starts. --
+            intent = self._intent_for(task)
+            if not intent.get('success_condition'):
+                blocker = blocker_mod.Blocker(
+                    blocker_type='ambiguous_instruction',
+                    blocker_message='Could not derive a success condition for this request.',
+                    current_url=page_state.url if page_state else '',
+                ).to_dict()
+                task.blocker = blocker
+                task.status = TaskStatus.FAILED
+                task.result_summary = blocker['blocker_message']
+                yield self._terminal_event(task, task_id, 0)
+                return
+
             step_num = 0
             consecutive_failures = 0
             action_log: List[str] = []  # Track action types for loop detection
@@ -142,20 +184,35 @@ class SophisticatedTaskOrchestrator:
                 # -- Loop detection --
                 if self._detect_loop(action_log, task.context.get('action_history', [])):
                     screenshot = await self.browser.take_screenshot(task.context_id, task_id=task_id, step=step_num)
-                    task.result_summary = f"Completed after {step_num - 1} steps"
-                    task.status = TaskStatus.COMPLETED
+                    task.result_summary = f"Agent got stuck after {step_num - 1} steps"
+                    task.status = TaskStatus.FAILED
+                    task.blocker = blocker_mod.Blocker(
+                        blocker_type='partial_completion',
+                        blocker_message='Detected repeated actions with no progress.',
+                        current_url=page_state.url if page_state else '',
+                        page_title=page_state.title if page_state else '',
+                        failed_step=step_num,
+                        last_successful_step=max(len(task.steps) - 1, 0),
+                        suggested_next_step='Rephrase the task or take over the browser.',
+                    ).to_dict()
                     yield {'type': 'step_executed', 'step': step_num, 'action': 'done',
-                           'success': True, 'confidence': 0.7, 'task_id': task_id,
-                           'reasoning': 'Detected repeated actions - completing task',
-                           'thinking': '', 'screenshot': screenshot, 'error': ''}
-                    break
+                           'success': False, 'confidence': 0.2, 'task_id': task_id,
+                           'reasoning': 'Detected repeated actions with no progress',
+                           'thinking': '', 'screenshot': screenshot,
+                           'error': 'Agent got stuck in a repeated action pattern'}
+                    yield self._terminal_event(task, task_id, time.time() - task.start_time)
+                    return
 
                 # -- Browser liveness check --
                 if page_state.is_error and 'closed' in page_state.error.lower():
                     task.status = TaskStatus.FAILED
-                    yield {'type': 'task_failed', 'task_id': task_id,
-                           'error': 'Browser was closed. Reconnect and try again.',
-                           'steps_taken': step_num, 'execution_time': time.time() - task.start_time}
+                    task.blocker = blocker_mod.Blocker(
+                        blocker_type='navigation_failed',
+                        blocker_message='Browser was closed. Reconnect and try again.',
+                        current_url=page_state.url if page_state else '',
+                        failed_step=step_num,
+                    ).to_dict()
+                    yield self._terminal_event(task, task_id, time.time() - task.start_time)
                     return
 
                 yield {'type': 'step_started', 'step': step_num,
@@ -172,29 +229,65 @@ class SophisticatedTaskOrchestrator:
                     yield {'type': 'task_cancelled', 'task_id': task_id, 'steps_taken': step_num}
                     break
 
-                # AI provider out of quota - fail the task with a clear message
-                # rather than pretending to be "done".
-                if analysis.get('error') == 'ai_unavailable':
-                    task.status = TaskStatus.FAILED
-                    yield {'type': 'task_failed', 'task_id': task_id,
-                           'error': analysis.get('message', 'AI provider unavailable'),
-                           'steps_taken': len(task.steps),
-                           'execution_time': time.time() - task.start_time}
+                # Provider/site blockers - fail the task with a clear
+                # message rather than pretending to be "done".
+                if analysis.get('error') in (
+                    'ai_unavailable', 'site_requires_sign_in', 'site_blocked_by_bot_check'
+                ):
+                    err = analysis.get('error')
+                    btype = {
+                        'ai_unavailable': 'navigation_failed',
+                        'site_requires_sign_in': 'login_required',
+                        'site_blocked_by_bot_check': 'captcha_or_bot_protection',
+                    }[err]
+                    task.status = (TaskStatus.BLOCKED if btype != 'navigation_failed'
+                                   else TaskStatus.FAILED)
+                    task.result_summary = analysis.get('message', 'AI provider unavailable')
+                    task.blocker = blocker_mod.Blocker(
+                        blocker_type=btype,
+                        blocker_message=task.result_summary,
+                        current_url=page_state.url if page_state else '',
+                        page_title=page_state.title if page_state else '',
+                        failed_step=step_num,
+                        last_successful_step=max(len(task.steps) - 1, 0),
+                    ).to_dict()
+                    yield self._terminal_event(task, task_id, time.time() - task.start_time)
                     return
 
                 # -- Check if AI says done --
                 if analysis.get('task_complete') or analysis.get('action') == 'done':
-                    summary = (analysis.get('parameters', {}).get('summary', '')
-                               or analysis.get('reasoning', 'Task completed'))
-                    screenshot = await self.browser.take_screenshot(
-                        task.context_id, task_id=task_id, step=step_num)
-                    yield {'type': 'step_executed', 'step': step_num, 'action': 'done',
-                           'success': True, 'confidence': analysis.get('confidence', 0.9),
-                           'reasoning': summary, 'thinking': analysis.get('thinking', ''),
-                           'screenshot': screenshot, 'error': '', 'task_id': task_id}
-                    task.result_summary = summary
-                    task.status = TaskStatus.COMPLETED
-                    break
+                    vres = self._validation_result(task, page_state, analysis)
+                    if not vres.ok:
+                        logger.info(
+                            "Ignoring unvalidated completion for %s: %s",
+                            task_id, vres.reason)
+                        analysis = {
+                            'action': 'extract',
+                            'parameters': {'target': 'evidence for task completion'},
+                            'reasoning': (
+                                'Completion was proposed but not validated; '
+                                'extracting page evidence instead.'
+                            ),
+                            'thinking': vres.reason,
+                            'confidence': min(analysis.get('confidence', 0.5), 0.45),
+                            'task_complete': False,
+                        }
+                    else:
+                        summary = (analysis.get('parameters', {}).get('summary', '')
+                                   or analysis.get('reasoning', 'Task completed'))
+                        task.validation = self._validation_payload(task, vres)
+                        screenshot = await self.browser.take_screenshot(
+                            task.context_id, task_id=task_id, step=step_num)
+                        yield {'type': 'step_executed', 'step': step_num, 'action': 'done',
+                               'success': True, 'confidence': analysis.get('confidence', 0.9),
+                               'reasoning': summary, 'thinking': analysis.get('thinking', ''),
+                               'screenshot': screenshot, 'error': '', 'task_id': task_id,
+                               'success_condition': intent.get('success_condition', ''),
+                               'validation_method': intent.get('validation_strategy', ''),
+                               'validation': task.validation}
+                        task.result_summary = summary
+                        task.status = TaskStatus.COMPLETED
+                        break
 
                 # -- 2. Execute action directly from analysis (skip separate plan API call) --
                 action_type = analysis.get('action', 'extract')
@@ -211,21 +304,46 @@ class SophisticatedTaskOrchestrator:
                 if self._is_cancelled(cancel_event):
                     break
 
+                # -- Risk / confirmation gate. High-impact actions (cart,
+                #    submit, send, delete, ...) pause for explicit confirmation
+                #    unless the run was started pre-confirmed. --
+                if (not task.options.get('confirmed')
+                        and risk_layer.action_requires_confirmation(
+                            action_type, params, intent)):
+                    blocker = blocker_mod.confirmation_blocker(
+                        risk_layer.confirmation_message(intent),
+                        url=page_state.url if page_state else '',
+                        title=page_state.title if page_state else '',
+                        last_successful_step=len(task.steps),
+                    ).to_dict()
+                    task.blocker = blocker
+                    task.status = TaskStatus.BLOCKED
+                    task.result_summary = blocker['blocker_message']
+                    yield self._terminal_event(task, task_id,
+                                               time.time() - task.start_time)
+                    return
+
                 exec_result = await self.browser.execute_action(
                     task.context_id, action_type, params)
 
                 # -- Fatal error: browser gone --
                 if exec_result.get('fatal'):
                     task.status = TaskStatus.FAILED
+                    task.result_summary = 'Browser disconnected. Please restart and try again.'
+                    task.blocker = blocker_mod.Blocker(
+                        blocker_type='navigation_failed',
+                        blocker_message=task.result_summary,
+                        current_url=page_state.url if page_state else '',
+                        failed_step=step_num,
+                        last_successful_step=max(len(task.steps) - 1, 0),
+                        visible_evidence=exec_result.get('error', ''),
+                    ).to_dict()
                     yield {'type': 'step_executed', 'step': step_num,
                            'action': action_type, 'success': False,
                            'confidence': 0, 'reasoning': 'Browser disconnected',
                            'thinking': '', 'screenshot': None,
                            'error': exec_result.get('error', ''), 'task_id': task_id}
-                    yield {'type': 'task_failed', 'task_id': task_id,
-                           'error': 'Browser disconnected. Please restart and try again.',
-                           'steps_taken': len(task.steps),
-                           'execution_time': time.time() - task.start_time}
+                    yield self._terminal_event(task, task_id, time.time() - task.start_time)
                     return
 
                 # NOTE: the executor already settles after each action
@@ -250,6 +368,7 @@ class SophisticatedTaskOrchestrator:
                 record = {
                     'step': step_num, 'action': action_type, 'parameters': params,
                     'success': success, 'result': json.dumps(exec_result)[:200],
+                    'data': exec_result.get('data', {}) or {},
                     'summary': f"{action_type}: {'OK' if success else 'FAILED'}",
                     'evaluation': f"{action_type} {'succeeded' if success else 'failed'}",
                     'timestamp': datetime.now().isoformat()
@@ -285,15 +404,58 @@ class SophisticatedTaskOrchestrator:
                        'screenshot': screenshot, 'diff': diff,
                        'error': exec_result.get('error', ''), 'task_id': task_id}
 
+                if exec_result.get('task_complete'):
+                    vres = self._validation_result(
+                        task, new_state, {
+                            'action': 'done',
+                            'parameters': {'summary': exec_result.get('summary', '')},
+                            'intent': analysis.get('intent'),
+                        })
+                    if vres.ok:
+                        task.validation = self._validation_payload(task, vres)
+                        task.result_summary = (
+                            exec_result.get('summary')
+                            or exec_result.get('error')
+                            or 'Task completed'
+                        )
+                        task.status = TaskStatus.COMPLETED if success else TaskStatus.FAILED
+                        break
+                    exec_result['task_complete'] = False
+                    logger.info("Ignoring workflow task_complete for %s: %s", task_id, vres.reason)
+
                 # Handle failures
                 if not success:
                     consecutive_failures += 1
+                    error_text = exec_result.get('error', '')
+                    if (
+                        'Unsupported browser action' in error_text
+                        or 'cannot be executed directly' in error_text
+                        or 'Refusing to type' in error_text
+                    ):
+                        blocker = self._classify_blocker(
+                            new_state, error_text,
+                            failed_step=step_num,
+                            last_successful_step=max(len(task.steps) - 1, 0))
+                        blocker['suggested_next_step'] = (
+                            'Revise the plan or clean extracted text before retrying.')
+                        task.blocker = blocker
+                        task.status = (TaskStatus.BLOCKED
+                                       if blocker['status'] == 'blocked'
+                                       else TaskStatus.FAILED)
+                        task.result_summary = blocker['blocker_message']
+                        yield self._terminal_event(task, task_id, time.time() - task.start_time)
+                        return
                     if consecutive_failures >= 5:
-                        task.status = TaskStatus.FAILED
-                        yield {'type': 'task_failed', 'task_id': task_id,
-                               'error': 'Too many consecutive failures. Task aborted.',
-                               'steps_taken': len(task.steps),
-                               'execution_time': time.time() - task.start_time}
+                        blocker = self._classify_blocker(
+                            new_state, exec_result.get('error', ''),
+                            failed_step=step_num,
+                            last_successful_step=max(len(task.steps) - 1, 0))
+                        task.blocker = blocker
+                        task.status = (TaskStatus.BLOCKED
+                                       if blocker['status'] == 'blocked'
+                                       else TaskStatus.FAILED)
+                        task.result_summary = blocker['blocker_message']
+                        yield self._terminal_event(task, task_id, time.time() - task.start_time)
                         return
                 else:
                     consecutive_failures = 0
@@ -322,9 +484,39 @@ class SophisticatedTaskOrchestrator:
             stats = self.ai_agent.get_token_stats()
             task.total_cost = stats.get('total_cost', 0)
 
+            # Ran out of steps while still EXECUTING. Let the validator decide
+            # the honest terminal state instead of a blanket "failed".
             if task.status == TaskStatus.EXECUTING:
-                task.status = TaskStatus.COMPLETED
-                task.result_summary = f"Completed {step_num} steps"
+                vres = self._validation_result(task, page_state, {})
+                if vres.ok:
+                    task.status = TaskStatus.COMPLETED
+                    task.validation = self._validation_payload(task, vres)
+                    task.result_summary = task.result_summary or vres.reason
+                elif vres.status == validators_mod.UNVERIFIED:
+                    task.status = TaskStatus.UNVERIFIED
+                    task.result_summary = (
+                        f"Reached {step_num} steps; performed work but could not "
+                        f"prove completion."
+                    )
+                    task.blocker = blocker_mod.Blocker(
+                        blocker_type='partial_completion',
+                        blocker_message=vres.reason or task.result_summary,
+                        current_url=page_state.url if page_state else '',
+                        page_title=page_state.title if page_state else '',
+                        last_successful_step=max(len(task.steps) - 1, 0),
+                        visible_evidence=vres.evidence,
+                    ).to_dict()
+                else:
+                    blocker = vres.blocker or self._classify_blocker(
+                        page_state, vres.reason,
+                        failed_step=len(task.steps),
+                        last_successful_step=max(len(task.steps) - 1, 0))
+                    task.blocker = task.blocker or blocker
+                    task.status = (TaskStatus.BLOCKED
+                                   if task.blocker.get('status') == 'blocked'
+                                   else TaskStatus.FAILED)
+                    task.result_summary = (task.blocker.get('blocker_message')
+                                           or vres.reason)
 
             self._update_metrics(task, exec_time)
 
@@ -334,22 +526,25 @@ class SophisticatedTaskOrchestrator:
                 except Exception as e:
                     logger.error(f"DB save failed: {e}")
 
-            yield {'type': 'task_completed', 'task_id': task_id,
-                   'status': task.status.value, 'steps_taken': len(task.steps),
-                   'execution_time': exec_time,
-                   'cost_summary': f"${task.total_cost:.4f}",
-                   'groq_stats': stats, 'result_summary': task.result_summary,
-                   'urls_visited': task.context.get('urls_visited', []),
-                   'extracted_data': task.context.get('extracted_data', [])}
+            if task.status != TaskStatus.CANCELLED:
+                yield self._terminal_event(task, task_id, exec_time)
 
         except Exception as e:
             task.status = TaskStatus.FAILED
             task.end_time = time.time()
             logger.error(f"Task failed: {e}")
             self.performance_metrics['failed_tasks'] += 1
-            yield {'type': 'task_failed', 'task_id': task_id, 'error': str(e),
-                   'steps_taken': len(task.steps),
-                   'execution_time': task.end_time - (task.start_time or task.end_time)}
+            task.blocker = task.blocker or blocker_mod.Blocker(
+                blocker_type='navigation_failed',
+                blocker_message=f"Unexpected error during execution: {e}",
+                current_url=(task.current_page_state.url
+                             if task.current_page_state else ''),
+                failed_step=len(task.steps),
+            ).to_dict()
+            task.result_summary = task.result_summary or str(e)
+            yield self._terminal_event(
+                task, task_id,
+                (task.end_time - (task.start_time or task.end_time)))
         finally:
             if task_id in self.active_tasks:
                 self.task_history.append({
@@ -396,18 +591,125 @@ class SophisticatedTaskOrchestrator:
                     and set(last4) <= {'scroll', 'wait', 'extract'}):
                 return True
 
-        # Same action+params 3x in a row, regardless of success.
-        # If they all FAILED we've been retrying a broken selector.
-        # If they all SUCCEEDED with identical params, the action isn't
-        # making progress (typing the same text into the same box, etc.).
+        # Same failed action+params 3x in a row means we are retrying a
+        # broken selector or blocked action. Successful repeated actions can
+        # be legitimate on dynamic pages, and should be judged by state/next
+        # planning rather than killed preemptively.
         if history and len(history) >= 3:
             last3h = history[-3:]
             same_action = len({h.get('action', '') for h in last3h}) == 1
             same_params = len({json.dumps(h.get('parameters', {}), sort_keys=True) for h in last3h}) == 1
-            if same_action and same_params:
+            all_failed = all(not h.get('success') for h in last3h)
+            if same_action and same_params and all_failed:
                 return True
 
         return False
+
+    def _classify_blocker(self, state: Optional[PageState], last_error: str = "",
+                          **kw) -> Dict[str, Any]:
+        """Delegate to the structured blocker classifier (core/blockers.py)."""
+        state = state or PageState("error", "Unknown", "", [], error="")
+        blocker = blocker_mod.classify_blocker(
+            url=state.url or "",
+            title=state.title or "",
+            content=state.content or "",
+            last_error=last_error or state.error or "",
+            is_error=state.is_error,
+            **kw,
+        )
+        return blocker.to_dict()
+
+    def _intent_for(self, task: AdvancedTask) -> Dict[str, Any]:
+        """Parse (once) and cache the structured intent for a task."""
+        if task.intent:
+            return task.intent
+        planner = getattr(self.ai_agent, "intent_planner", None)
+        if planner is not None:
+            try:
+                task.intent = planner.parse_intent(task.description).to_dict()
+            except Exception as e:
+                logger.error(f"Intent parse failed: {e}")
+                task.intent = {}
+        else:
+            task.intent = {}
+        return task.intent
+
+    def _validation_result(self, task: AdvancedTask, state: Optional[PageState],
+                           analysis: Dict[str, Any]):
+        """Run the composable validator system and return a ValidationResult."""
+        intent = (analysis or {}).get("intent") or self._intent_for(task)
+        history = task.context.get("action_history", [])
+        extracted = task.context.get("extracted_data", [])
+        return validators_mod.validate_completion(intent, state, history, extracted)
+
+    def _validate_completion(self, task: AdvancedTask, state: Optional[PageState],
+                             analysis: Dict[str, Any]) -> Tuple[bool, str]:
+        """Back-compat boolean wrapper around the validator system. Completion
+        requires the validator to return COMPLETED."""
+        res = self._validation_result(task, state, analysis)
+        return res.ok, res.reason
+
+    def _validation_payload(self, task: AdvancedTask, vres) -> Dict[str, Any]:
+        intent = task.intent or {}
+        return {
+            "status": vres.status,
+            "success_condition": intent.get("success_condition", ""),
+            "validation_method": intent.get("validation_strategy", ""),
+            "reason": vres.reason,
+            "evidence": vres.evidence,
+        }
+
+    def _terminal_event(self, task: AdvancedTask, task_id: str,
+                        exec_time: float) -> Dict[str, Any]:
+        """Build the terminal WebSocket event for a finished run.
+
+        COMPLETED runs carry validation evidence; every other terminal state
+        carries a precise structured blocker.
+        """
+        base = {
+            "task_id": task_id,
+            "status": task.status.value,
+            "steps_taken": len(task.steps),
+            "execution_time": exec_time,
+            "result_summary": task.result_summary,
+        }
+        stats = (self.ai_agent.get_token_stats()
+                 if hasattr(self.ai_agent, "get_token_stats") else {})
+        if task.status == TaskStatus.COMPLETED:
+            base.update({
+                "type": "task_completed",
+                "cost_summary": f"${task.total_cost:.4f}",
+                "groq_stats": stats,
+                "urls_visited": task.context.get("urls_visited", []),
+                "extracted_data": task.context.get("extracted_data", []),
+                "validation": task.validation or {},
+            })
+            return base
+        # failed / blocked / unverified share the task_failed envelope so the
+        # frontend's terminal handling fires; the precise state is in `status`.
+        blocker = task.blocker or {}
+        base.update({
+            "type": "task_failed",
+            "error": (task.result_summary or blocker.get("blocker_message")
+                      or "Task did not complete"),
+            "blocker": blocker,
+            "blocker_type": blocker.get("blocker_type", ""),
+            "blocker_message": blocker.get("blocker_message", ""),
+            "current_url": blocker.get("current_url", ""),
+            "page_title": blocker.get("page_title", ""),
+            "failed_step": blocker.get("failed_step", len(task.steps)),
+            "last_successful_step": blocker.get("last_successful_step",
+                                                max(len(task.steps) - 1, 0)),
+            "attempted_recoveries": blocker.get("attempted_recoveries", []),
+            "visible_evidence": blocker.get("visible_evidence", ""),
+            "suggested_next_step": blocker.get("suggested_next_step", ""),
+        })
+        return base
+
+    def _same_url(self, a: str, b: str) -> bool:
+        def clean(u: str) -> str:
+            return (u or "").rstrip("/")
+        return bool(a and b and clean(a) == clean(b))
 
     # ------------------------------------------------------------------ #
     # Non-streaming

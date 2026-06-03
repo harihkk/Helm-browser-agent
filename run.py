@@ -50,7 +50,6 @@ def check_requirements():
         import groq
         import aiosqlite
         import httpx
-        from pydantic_settings import BaseSettings
         from bs4 import BeautifulSoup
         print("  All packages installed")
     except ImportError as e:

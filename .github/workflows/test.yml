@@ -31,5 +31,5 @@ jobs:
           print(f'OK: {len(files)} files parse')
           "
 
-      - name: Smoke tests
-        run: python tests/unit/test_smoke.py
+      - name: Unit + integration + E2E tests
+        run: python -m unittest discover -s tests/unit -p 'test_*.py' -v

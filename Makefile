@@ -10,7 +10,7 @@ help:
 	@echo "  make install    Create venv and install dependencies"
 	@echo "  make dev        Install + Playwright browsers"
 	@echo "  make run        Start the agent server on http://localhost:8000"
-	@echo "  make test       Run smoke tests (no network)"
+	@echo "  make test       Run the full test suite (no network)"
 	@echo "  make lint       Quick syntax check across the codebase"
 	@echo "  make reset-db   Wipe agent_memory.db (recreated on next run)"
 	@echo "  make clean      Remove caches and screenshots/"
@@ -29,7 +29,7 @@ run:
 	$(PY) run.py
 
 test:
-	$(PY) tests/unit/test_smoke.py
+	$(PY) -m unittest discover -s tests/unit -p 'test_*.py'
 
 lint:
 	@$(PY) -c "import ast, pathlib, sys; \

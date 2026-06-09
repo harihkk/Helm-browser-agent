@@ -232,13 +232,15 @@ class SophisticatedTaskOrchestrator:
                 # Provider/site blockers - fail the task with a clear
                 # message rather than pretending to be "done".
                 if analysis.get('error') in (
-                    'ai_unavailable', 'site_requires_sign_in', 'site_blocked_by_bot_check'
+                    'ai_unavailable', 'site_requires_sign_in',
+                    'site_blocked_by_bot_check', 'ambiguous_instruction'
                 ):
                     err = analysis.get('error')
                     btype = {
                         'ai_unavailable': 'navigation_failed',
                         'site_requires_sign_in': 'login_required',
                         'site_blocked_by_bot_check': 'captcha_or_bot_protection',
+                        'ambiguous_instruction': 'ambiguous_instruction',
                     }[err]
                     task.status = (TaskStatus.BLOCKED if btype != 'navigation_failed'
                                    else TaskStatus.FAILED)
@@ -325,6 +327,33 @@ class SophisticatedTaskOrchestrator:
 
                 exec_result = await self.browser.execute_action(
                     task.context_id, action_type, params)
+
+                # -- Unsafe URL: the SSRF guard refused this navigation. Stop
+                #    with a precise, user-overridable blocker rather than
+                #    burning retries on a target we will never open. --
+                if exec_result.get('blocked_url'):
+                    task.status = TaskStatus.BLOCKED
+                    task.result_summary = exec_result.get('error', 'Blocked unsafe URL')
+                    task.blocker = blocker_mod.Blocker(
+                        blocker_type='unsafe_action',
+                        blocker_message=task.result_summary,
+                        current_url=page_state.url if page_state else '',
+                        page_title=page_state.title if page_state else '',
+                        failed_step=step_num,
+                        last_successful_step=max(len(task.steps) - 1, 0),
+                        suggested_next_step=(
+                            'This URL points at a local or metadata address and is '
+                            'blocked for safety. Set HELM_ALLOW_PRIVATE_HOSTS=true to '
+                            'allow local targets you trust.'),
+                    ).to_dict()
+                    yield {'type': 'step_executed', 'step': step_num,
+                           'action': action_type, 'parameters': params,
+                           'success': False, 'confidence': 0,
+                           'reasoning': 'Navigation blocked by URL safety policy',
+                           'thinking': '', 'screenshot': None,
+                           'error': task.result_summary, 'task_id': task_id}
+                    yield self._terminal_event(task, task_id, time.time() - task.start_time)
+                    return
 
                 # -- Fatal error: browser gone --
                 if exec_result.get('fatal'):

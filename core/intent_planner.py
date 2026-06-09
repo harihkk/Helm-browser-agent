@@ -7,6 +7,7 @@ module converts high-confidence user intents into deterministic browser
 actions before the page-level LLM loop runs.
 """
 
+import os
 import re
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -134,6 +135,12 @@ class IntentPlanner:
         "samsung.com": "https://www.samsung.com/us/search/searchMain/?searchTerm={query}",
         "store.google.com": "https://store.google.com/us/category/phones?q={query}",
     }
+
+    # General web search goes through DuckDuckGo's HTML endpoint, not Google:
+    # Google serves a reCAPTCHA "unusual traffic" wall to automated browsers,
+    # which dead-ends every search. DuckDuckGo renders results server-side and
+    # does not block automation. Overridable via HELM_SEARCH_URL.
+    WEB_SEARCH = os.getenv("HELM_SEARCH_URL", "https://duckduckgo.com/html/?q={q}")
 
     # Any bare domain token (reddit.com, amazon.com, store.google.com, ...) so a
     # site name typed in the prompt never leaks into the search query.
@@ -391,6 +398,18 @@ class IntentPlanner:
         # Back-compat shim: the single cleaner is _clean_query.
         return self._clean_query(goal)
 
+    def _web_search_url(self, query: str) -> str:
+        return self.WEB_SEARCH.format(q=quote_plus(query))
+
+    def _site_scoped_search_url(self, domain: str, query: str) -> str:
+        return self._web_search_url(f"site:{domain} {query}")
+
+    def _on_web_results(self, url: str) -> bool:
+        u = (url or "").lower()
+        return any(s in u for s in (
+            "duckduckgo.com/html", "duckduckgo.com/?q",
+            "google.com/search", "bing.com/search"))
+
     def _success_condition_for(self, task_type: str, target_site: str, query: str,
                                content: str, entity: str, target_url: str) -> str:
         if task_type == "media_playback":
@@ -471,8 +490,8 @@ class IntentPlanner:
 
         if intent.target_site and intent.search_query:
             domain = intent.target_site.removeprefix("www.")
-            search_url = f"https://www.google.com/search?q={quote_plus('site:' + domain + ' ' + intent.search_query)}"
-            if "google.com/search" not in current_url.lower():
+            search_url = self._site_scoped_search_url(domain, intent.search_query)
+            if not self._on_web_results(current_url):
                 return IntentAction(
                     action="navigate",
                     parameters={"url": search_url},
@@ -485,8 +504,8 @@ class IntentPlanner:
                 )
 
         if intent.search_query:
-            search_url = f"https://www.google.com/search?q={quote_plus(intent.search_query)}"
-            if "google.com/search" not in current_url.lower():
+            search_url = self._web_search_url(intent.search_query)
+            if not self._on_web_results(current_url):
                 return IntentAction(
                     action="navigate",
                     parameters={"url": search_url},
@@ -997,8 +1016,8 @@ class IntentPlanner:
         query = self._extract_search_query(goal, ("google", "search", "the web", "web", "look up"))
         if not query:
             return None
-        target = f"https://www.google.com/search?q={quote_plus(query)}"
-        if "google.com/search" in state.get("url", "").lower() and quote_plus(query).lower() in state.get("url", "").lower():
+        target = self._web_search_url(query)
+        if self._on_web_results(state.get("url", "")) and quote_plus(query).lower() in state.get("url", "").lower():
             if self._last_successful_extract(history):
                 return IntentAction(
                     action="done",
@@ -1058,8 +1077,8 @@ class IntentPlanner:
                     task_complete=True,
                 )
 
-        search_url = f"https://www.google.com/search?q={quote_plus('site:' + domain + ' ' + query)}"
-        if "google.com/search" in current.lower():
+        search_url = self._site_scoped_search_url(domain, query)
+        if self._on_web_results(current):
             if self._last_successful_extract(history):
                 return IntentAction(
                     action="done",

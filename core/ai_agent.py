@@ -70,6 +70,24 @@ OUTPUT
 Respond with valid JSON only - no markdown fences, no text outside the JSON:
 {"thinking": "...", "action": "...", "parameters": {}, "reasoning": "...", "confidence": 0.8, "task_complete": false}"""
 
+
+# Used once per task to turn ANY phrasing into the opening URL. This is the
+# "understand the request" step - it must be the LLM, not regex, so it works
+# for prompts no rule anticipated.
+INTENT_SYSTEM_PROMPT = """You turn ANY natural-language browser request into the single best URL to open first. Reason about what the user wants and how the web works - there is no fixed list, reason it out each time.
+
+Separate INTENT (search, play, watch, open, buy, add, find, read) from CONTENT (the actual thing). Only the CONTENT goes into a query or URL - never the command words and never the site name.
+
+Pick the destination by reasoning:
+- The user names a site or app -> that site's OWN search-results URL, built the way that site's URLs actually work, with the CONTENT as the query.
+- Watch / play / listen to media -> YouTube search results: https://www.youtube.com/results?search_query=<content>
+- Buy / shop a product -> the brand's own site search if it is a brand product (an Apple product on apple.com, a Pixel on store.google.com), otherwise a major retailer's search (e.g. amazon.com/s?k=<content>).
+- A general question, a bare phrase, or anything with no clear site -> a DuckDuckGo search of the CONTENT: https://duckduckgo.com/html/?q=<content>
+  Use DuckDuckGo, never Google: Google serves automated browsers a CAPTCHA wall.
+
+URL-encode the query. Output JSON only, nothing else:
+{"task_type":"...","target_site":"<canonical domain or ''>","content":"<the thing only - no commands, no site name>","start_url":"<one https URL to open first>","success_condition":"<what visible page state proves the task is done>"}"""
+
 try:
     from groq import Groq
     GROQ_AVAILABLE = True
@@ -233,11 +251,57 @@ class GroqAIAgent:
     # Analyze page and decide next action
     # ------------------------------------------------------------------ #
 
+    async def extract_intent(self, prompt: str) -> Dict[str, Any]:
+        """LLM understanding of the request -> the URL to open first. Works for
+        any phrasing because the model reasons about it, not a rule table."""
+        resp = await self._call_groq(
+            f"Request: {prompt}\nReturn the intent JSON.",
+            model=self.model, system=INTENT_SYSTEM_PROMPT)
+        data = self._parse_json(resp)
+        return data if isinstance(data, dict) else {}
+
+    async def _llm_first_route(self, task_goal: str) -> Optional[Dict[str, Any]]:
+        """First step on a blank page: let the LLM read the request and choose
+        the opening URL. Returns None (deferring to the deterministic planner)
+        when no AI is available or the model gives no usable URL."""
+        try:
+            intent = await self.extract_intent(task_goal)
+        except RuntimeError:
+            return None  # AI unavailable -> deterministic planner takes over
+        except Exception as e:
+            logger.warning(f"LLM intent routing failed: {e}")
+            return None
+        url = (intent.get("start_url") or "").strip()
+        if not re.match(r'^https?://\S+', url, re.I):
+            return None
+        content = intent.get("content") or intent.get("search_query") or task_goal
+        return {
+            "thinking": f"Understood intent: {intent.get('task_type', '')} / {content}",
+            "action": "navigate",
+            "parameters": {"url": url},
+            "reasoning": f"Open {url} to handle: {content}",
+            "confidence": 0.9,
+            "task_complete": False,
+            "intent": intent,
+            "success_condition": intent.get("success_condition", ""),
+        }
+
     async def analyze_page_text(self, page_state: Dict, task_goal: str,
                                 context: Dict) -> Dict[str, Any]:
         blocked = self._blocked_site_action(task_goal, page_state, context)
         if blocked:
             return blocked
+
+        # FIRST step on a blank page: the LLM decides the opening route from the
+        # raw request. This is the part that must work for ANY prompt, so it is
+        # model-driven, not regex. The deterministic planner remains the
+        # fallback (no key / quota) and drives the on-site steps that follow.
+        history = context.get('action_history', []) or []
+        cur_url = (page_state or {}).get('url', '') or ''
+        if not history and cur_url in ('', 'about:blank', 'error'):
+            routed = await self._llm_first_route(task_goal)
+            if routed:
+                return routed
 
         try:
             quick = self._quick_action(task_goal, page_state, context)

@@ -560,10 +560,16 @@ class IntentPlanner:
 
     def _plan_youtube_media(self, goal: str, state: Dict, history: List[Dict]) -> Optional[IntentAction]:
         goal_lower = goal.lower()
-        if "youtube" not in goal_lower:
+        # Fire on an explicit "youtube" mention OR an inferred media intent
+        # ("play/watch X" with no site named), so media routing does not depend
+        # on the user saying the word youtube.
+        intent = self.parse_intent(goal)
+        is_media = (intent.task_type == "media_playback"
+                    and intent.target_site == "youtube.com")
+        if "youtube" not in goal_lower and not is_media:
             return None
-        wants_play = any(word in goal_lower for word in ("play", "watch", "listen", "open"))
-        searchish = any(phrase in goal_lower for phrase in ("search for", "look for", "find", "play"))
+        wants_play = is_media or any(word in goal_lower for word in ("play", "watch", "listen", "open"))
+        searchish = is_media or any(phrase in goal_lower for phrase in ("search for", "look for", "find", "play"))
         if not (wants_play or searchish):
             return None
 
@@ -1038,14 +1044,24 @@ class IntentPlanner:
 
     def _plan_direct_site_search(self, goal: str, state: Dict, history: List[Dict]) -> Optional[IntentAction]:
         goal_lower = goal.lower()
-        if not any(phrase in goal_lower for phrase in ("look for", "search for", "find", "look up", "open", "visit", "dsearch")):
-            return None
-
-        domain = self._extract_target_domain(goal)
+        # Use the inferred intent so a product/brand/purchase signal routes to
+        # the site's OWN search URL even when the user never named the site
+        # ("buy an iphone" -> apple.com/search, not a Google site: search).
+        intent = self.parse_intent(goal)
+        domain = intent.target_site or self._extract_target_domain(goal)
         if domain not in self.DIRECT_SITE_SEARCHES:
             return None
+        # Search-like intents route directly; anything else still needs an
+        # explicit search phrase so we don't hijack plain navigation.
+        search_like = intent.task_type in (
+            "site_search", "product_search", "web_search",
+            "media_playback", "cart_update", "information_extraction")
+        if not search_like and not any(
+                phrase in goal_lower for phrase in
+                ("look for", "search for", "find", "look up", "open", "visit", "dsearch")):
+            return None
 
-        query = self._extract_site_query(goal, domain)
+        query = intent.search_query or self._extract_site_query(goal, domain)
         if not query:
             return None
 
@@ -1448,11 +1464,20 @@ class IntentPlanner:
         root = domain.split('.')[0]
         if root and root not in ("com", "org", "net"):
             query = re.sub(rf'\b{re.escape(root)}\b', ' ', query, flags=re.I)
-        for alias, alias_domain in self.SITE_ALIASES.items():
-            if alias_domain == domain:
-                query = re.sub(rf'\b{re.escape(alias)}\b', ' ', query, flags=re.I)
+        # Strip site-name aliases EXCEPT on product/commerce domains, where the
+        # alias word doubles as the product the user wants (e.g. "pixel"). The
+        # domain-root strip above already removes the redundant brand token there.
+        if domain not in ("apple.com", "samsung.com", "store.google.com"):
+            for alias, alias_domain in self.SITE_ALIASES.items():
+                if alias_domain == domain:
+                    query = re.sub(rf'\b{re.escape(alias)}\b', ' ', query, flags=re.I)
+        # Command scaffolding + purchase/price/question filler, so the query is
+        # the product/topic rather than the user's phrasing.
         query = re.sub(
-            r'\b(?:can you|can u|please|go|got|o|to|on|over|an|and|d|dsearch|look|for|search|find|open|visit|site|website|page|result|results)\b',
+            r'\b(?:can you|can u|please|go|got|o|to|on|over|an|a|and|d|dsearch|'
+            r'look|for|search|find|open|visit|site|website|page|result|results|'
+            r'buy|order|purchase|get|me|my|some|good|new|the|whats|what|'
+            r'how|much|is|cheapest|cost|price|of)\b',
             ' ',
             query,
             flags=re.I,

@@ -113,6 +113,8 @@ class IntentPlanner:
         "stack overflow": "stackoverflow.com",
         "amazon": "amazon.com",
         "apple": "apple.com",
+        "samsung": "samsung.com",
+        "pixel": "store.google.com",
         "hacker news": "news.ycombinator.com",
         "ycombinator": "news.ycombinator.com",
         "news.ycombinator": "news.ycombinator.com",
@@ -128,6 +130,9 @@ class IntentPlanner:
         "stackoverflow.com": "https://stackoverflow.com/search?q={query}",
         "amazon.com": "https://www.amazon.com/s?k={query}",
         "medium.com": "https://medium.com/search?q={query}",
+        "apple.com": "https://www.apple.com/search/{query}",
+        "samsung.com": "https://www.samsung.com/us/search/searchMain/?searchTerm={query}",
+        "store.google.com": "https://store.google.com/us/category/phones?q={query}",
     }
 
     GITHUB_STOP_WORDS = {
@@ -196,12 +201,29 @@ class IntentPlanner:
         requires_confirmation = False
 
         low = normalized.lower()
+        inferred_domain = _NORMALIZER.infer_target_domain(normalized)
+        _has_purchase = _NORMALIZER.has_purchase_intent(normalized)
+        _has_media = _NORMALIZER.has_media_intent(normalized)
         if "keep" in low and any(w in low for w in ("write", "note", "create", "add", "save")):
             task_type = "note_creation"
             target_app = "google_keep"
             target_site = "keep.google.com"
             content_to_type = self._extract_keep_note_text(original)
             allowed_actions += ["write_google_keep_note", "validate_note_created"]
+        elif _has_media and not target_site:
+            # "play/watch X" with no site named -> route to YouTube. Media
+            # intent beats purchase intent (this branch comes first).
+            task_type = "media_playback"
+            target_site = "youtube.com"
+            search_query = self._clean_command_text(normalized)
+            allowed_actions += ["play_youtube_result", "ensure_youtube_playback", "validate_media_playing"]
+        elif inferred_domain and (not target_site or target_site == inferred_domain):
+            # A product/brand signal (iphone, galaxy, pixel, ...) implies the
+            # destination domain even when the user never names the site.
+            task_type = "site_search"
+            target_site = inferred_domain
+            search_query = self._clean_command_text(normalized)
+            entity_or_object = search_query
         elif "youtube" in low and any(w in low for w in ("play", "watch", "listen", "search", "find")):
             task_type = "media_playback"
             target_site = "youtube.com"
@@ -215,7 +237,8 @@ class IntentPlanner:
             search_query = gh["query"]
             entity_or_object = f"{gh['owner']}/{gh['repo']}"
             allowed_actions += ["open_first_github_code_result"]
-        elif "amazon" in low and any(w in low for w in ("add", "cart", "basket", "buy", "price", "find", "search")):
+        elif ("amazon" in low and any(w in low for w in ("add", "cart", "basket", "buy", "price", "find", "search"))) \
+                or (_has_purchase and not inferred_domain and not target_site and not _has_media):
             task_type = "cart_update" if any(w in low for w in ("add", "cart", "basket")) else "product_search"
             target_site = "amazon.com"
             search_query = self._extract_cart_query(original) or self._extract_site_query(original, "amazon.com")
@@ -225,13 +248,6 @@ class IntentPlanner:
             risk_level = "medium" if task_type == "cart_update" else "low"
             requires_confirmation = task_type == "cart_update"
             allowed_actions += ["add_amazon_item_to_cart", "validate_cart_updated"]
-        elif "iphone" in low and ("apple" in low or "apply" in low):
-            # No hardcoded Apple product-page slugs - they 404 and rot every
-            # product cycle. Treat this as a site search and let the agent open
-            # the real page and extract the price.
-            task_type = "site_search"
-            target_site = "apple.com"
-            search_query = self._extract_site_query(original, "apple.com")
         elif target_url:
             task_type = "navigation" if not any(w in low for w in ("search", "find", "look")) else "site_search"
             search_query = self._extract_query_around_url(original, target_url)

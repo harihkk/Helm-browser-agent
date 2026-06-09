@@ -306,8 +306,10 @@ class QuickActionRouting(unittest.TestCase):
         )
         self.assertEqual(action["action"], "navigate")
         url = action["parameters"]["url"]
-        self.assertIn("google.com/search", url)
+        # Apple now has its own entry in DIRECT_SITE_SEARCHES, so the agent
+        # uses Apple's search endpoint, never a hardcoded buy-iphone slug.
         self.assertIn("apple.com", url)
+        self.assertIn("/search", url)
         self.assertNotIn("/shop/buy-iphone", url)
 
     def test_amazon_add_to_cart_routes_to_search_then_cart_action(self):

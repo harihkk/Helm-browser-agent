@@ -45,6 +45,40 @@ FILLER_WORDS = {
     "wanna", "gonna", "need", "to", "for", "and", "then",
 }
 
+# Product/brand signals that imply a destination domain even when the user
+# never names a site. Ordered list, first match wins, so multi-word entries
+# precede the shorter ones they overlap. Matched case-insensitively as a plain
+# substring against the whole prompt.
+PRODUCT_DOMAIN_SIGNALS = [
+    ("apple watch", "apple.com"),         # Apple Watch wearables
+    ("macbook air", "apple.com"),         # MacBook Air laptops
+    ("macbook pro", "apple.com"),         # MacBook Pro laptops
+    ("macbook", "apple.com"),             # any other MacBook
+    ("mac mini", "apple.com"),            # Mac mini desktop
+    ("mac studio", "apple.com"),          # Mac Studio desktop
+    ("mac pro", "apple.com"),             # Mac Pro desktop
+    ("imac", "apple.com"),                # iMac all-in-one
+    ("iphone", "apple.com"),              # iPhone phones
+    ("ipad", "apple.com"),                # iPad tablets
+    ("airpods", "apple.com"),             # AirPods earbuds
+    ("pixel watch", "store.google.com"),  # Google Pixel Watch wearables
+    ("pixel buds", "store.google.com"),   # Google Pixel Buds earbuds
+    ("pixel tablet", "store.google.com"), # Google Pixel Tablet
+    ("pixel", "store.google.com"),        # Google Pixel phones
+    ("galaxy watch", "samsung.com"),      # Samsung Galaxy Watch wearables
+    ("galaxy buds", "samsung.com"),       # Samsung Galaxy Buds earbuds
+    ("galaxy tab", "samsung.com"),        # Samsung Galaxy Tab tablets
+    ("galaxy", "samsung.com"),            # Samsung Galaxy phones
+]
+
+# Purchase / price intent verbs. These imply "go shopping" even when no brand
+# or site is named. Single source of truth: the verbs that also lived in
+# ACTION_VERBS["submit"] (buy/order/purchase) are removed from there.
+PURCHASE_VERBS = frozenset({
+    "buy", "order", "purchase", "get me", "find me",
+    "price of", "cost of", "how much is", "how much does", "cheapest",
+})
+
 # Command verb families. The key is the canonical primary_action; the values
 # are surface forms (categories, not site names) we map onto it.
 ACTION_VERBS = {
@@ -58,7 +92,7 @@ ACTION_VERBS = {
     "extract": ("extract", "scrape", "pull", "grab", "get me", "collect"),
     "compare": ("compare", "versus", "vs", "difference between"),
     "fill": ("fill", "fill in", "fill out", "complete"),
-    "submit": ("submit", "send", "post", "publish", "checkout", "buy", "order", "purchase"),
+    "submit": ("submit", "send", "post", "publish", "checkout"),
 }
 
 _URL_RE = re.compile(r"https?://[^\s,)\]]+", re.I)
@@ -110,6 +144,39 @@ class PromptNormalizer:
         if self.detect_urls(text):
             return "navigate"
         return "search"
+
+    def infer_target_domain(self, text: str) -> str:
+        """Domain implied by a product/brand signal, even when the user never
+        names a site. First match in PRODUCT_DOMAIN_SIGNALS wins; '' if none."""
+        low = (text or "").lower()
+        for signal, domain in PRODUCT_DOMAIN_SIGNALS:
+            if signal in low:
+                return domain
+        return ""
+
+    def has_purchase_intent(self, text: str) -> bool:
+        """True when a purchase/price verb is present as a genuine purchase.
+
+        Returns False when the only purchase verbs sit inside a note/reminder
+        clause (e.g. "write a note to buy milk"), detected by a
+        note/write/reminder/remember word within the 4 tokens before the verb.
+        """
+        tokens = [t.strip(".,:;!?") for t in (text or "").lower().split()]
+        note_words = {"note", "write", "reminder", "remember"}
+        for verb in PURCHASE_VERBS:
+            parts = verb.split()
+            n = len(parts)
+            for i in range(len(tokens) - n + 1):
+                if tokens[i:i + n] == parts:
+                    window = tokens[max(0, i - 4):i]
+                    if not any(w in note_words for w in window):
+                        return True
+        return False
+
+    def has_media_intent(self, text: str) -> bool:
+        """True for play/watch/listen/stream prompts. Reuses detect_action_verbs
+        so the media-verb list lives in exactly one place."""
+        return "play" in self.detect_action_verbs(text)
 
     def strip_filler(self, text: str) -> str:
         """Remove politeness/command scaffolding to leave the payload.

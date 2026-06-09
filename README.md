@@ -1,6 +1,6 @@
 # Helm
 
-Drive a real browser with plain English. Helm turns a natural-language
+Drive a real browser with plain English. Helm turns a natural language
 instruction into a structured intent, plans one safe browser action at a time,
 executes it, observes the page, and only reports the task done when a validator
 can prove it from the visible page.

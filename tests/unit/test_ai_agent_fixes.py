@@ -52,6 +52,13 @@ class HonestFallback(unittest.TestCase):
 class AmbiguousInstruction(unittest.TestCase):
     def test_analyze_returns_clean_error_instead_of_raising(self):
         agent = _offline_agent()
+        # The deterministic-planner fallback (no AI configured) is where an
+        # undecidable success condition is turned into a clean signal rather
+        # than an exception. Force that path.
+        agent.client = None
+        agent._gemini_key = ""
+        agent._ollama_url = ""
+        agent._ollama_model = ""
 
         def boom(*args, **kwargs):
             raise MissingSuccessConditionError("no success condition")

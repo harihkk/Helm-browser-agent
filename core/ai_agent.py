@@ -49,10 +49,11 @@ ACTIONS (choose exactly one):
 
 HOW YOU EXECUTE
 - Use EXACT selectors from the ELEMENTS list. Prefer #id, then [name=...], then the given selector.
+- A cookie / consent / privacy popup ("Accept", "Accept all", "Agree", "Got it", "OK") is blocking the page: click it to dismiss FIRST, then continue. Do not give up because of a popup.
+- STAY on the right site. Once you are on a site that fits the task (the company's own site, the search results you opened), do NOT navigate to a search engine (DuckDuckGo, Google) and do NOT navigate away to a different site. Use THIS site's own search box, menus, tabs, and forms to reach what the user asked for.
 - After typing into a search box, the next action is press_key Enter (or click submit).
 - If an element isn't visible, scroll once before concluding it's missing; scroll at most 3 times total.
 - Never repeat a failing action unchanged - change the element or the approach.
-- If a page redirected unexpectedly, reason about where you are and whether it still serves the goal.
 - If stuck, extract the page and reason from what's actually there. One action per turn.
 
 HOW YOU FINISH
@@ -305,18 +306,23 @@ class GroqAIAgent:
             if routed:
                 return routed
 
-        try:
-            quick = self._quick_action(task_goal, page_state, context)
-        except MissingSuccessConditionError as e:
-            # No provable success condition could be derived for this request.
-            # Surface a clean, structured signal instead of letting the
-            # exception escape analysis; the orchestrator maps this to an
-            # ambiguous_instruction blocker rather than a generic error.
-            logger.info(f"Ambiguous task (no success condition): {e}")
-            return {'error': 'ambiguous_instruction', 'message': str(e),
-                    'task_complete': False}
-        if quick:
-            return quick
+        # The deterministic planner is ONLY a fallback for when no AI is
+        # configured. When the model is driving, every on-page step is reasoned
+        # by the LLM below - so once it is on the right site it dismisses cookie
+        # walls and uses that site's own controls, instead of the planner
+        # re-deriving the goal and bouncing back to a search engine.
+        ai_available = bool(
+            self.client or self._gemini_key
+            or (self._ollama_url and self._ollama_model))
+        if not ai_available:
+            try:
+                quick = self._quick_action(task_goal, page_state, context)
+            except MissingSuccessConditionError as e:
+                logger.info(f"Ambiguous task (no success condition): {e}")
+                return {'error': 'ambiguous_instruction', 'message': str(e),
+                        'task_complete': False}
+            if quick:
+                return quick
 
         elements = self._format_elements(page_state.get('elements', []))
         history = self._format_history(context.get('action_history', []))

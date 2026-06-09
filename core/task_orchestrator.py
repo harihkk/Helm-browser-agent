@@ -117,6 +117,9 @@ class SophisticatedTaskOrchestrator:
 
         # Wait our turn on the shared browser. If the caller cancels while
         # we're queued, bail out cleanly without ever marking EXECUTING.
+        # Track ownership explicitly: Lock.locked() is True whenever *any*
+        # coroutine holds the lock, so we must only release one we acquired.
+        lock_held = False
         try:
             # Peek lock - if held, surface a 'queued' update so the UI
             # knows this task is waiting rather than silently stalling.
@@ -124,6 +127,7 @@ class SophisticatedTaskOrchestrator:
                 yield {'type': 'task_queued', 'task_id': task_id,
                        'description': description}
             await self._run_lock.acquire()
+            lock_held = True
         except asyncio.CancelledError:
             self.active_tasks.pop(task_id, None)
             self._cancel_events.pop(task_id, None)
@@ -500,12 +504,22 @@ class SophisticatedTaskOrchestrator:
                         task.description, task.context['action_history'],
                         page_state.to_dict() if page_state else {})
                     if completion.get('completed') and completion.get('confidence', 0) > 0.7:
-                        task.result_summary = completion.get('summary', 'Task completed')
-                        task.status = TaskStatus.COMPLETED
-                        yield {'type': 'completion_check', 'completed': True,
-                               'confidence': completion['confidence'],
-                               'summary': task.result_summary, 'task_id': task_id}
-                        break
+                        # The cheap completion model is not trusted on its own.
+                        # Gate it through the same evidence validator as the main
+                        # done path so this can't become a weaker second route to
+                        # COMPLETED.
+                        vres = self._validation_result(task, page_state, {})
+                        if vres.ok:
+                            task.result_summary = completion.get('summary', 'Task completed')
+                            task.status = TaskStatus.COMPLETED
+                            task.validation = self._validation_payload(task, vres)
+                            yield {'type': 'completion_check', 'completed': True,
+                                   'confidence': completion['confidence'],
+                                   'summary': task.result_summary, 'task_id': task_id}
+                            break
+                        logger.info(
+                            "Ignoring unvalidated periodic completion for %s: %s",
+                            task_id, vres.reason)
 
             # -- Finalize --
             task.end_time = time.time()
@@ -547,13 +561,15 @@ class SophisticatedTaskOrchestrator:
                     task.result_summary = (task.blocker.get('blocker_message')
                                            or vres.reason)
 
-            self._update_metrics(task, exec_time)
-
+            # Persist first, then count. Metrics should reflect tasks that were
+            # actually recorded, not ones whose save threw.
             if self._db:
                 try:
                     await self._db.save_task(task)
                 except Exception as e:
                     logger.error(f"DB save failed: {e}")
+
+            self._update_metrics(task, exec_time)
 
             if task.status != TaskStatus.CANCELLED:
                 yield self._terminal_event(task, task_id, exec_time)
@@ -584,7 +600,8 @@ class SophisticatedTaskOrchestrator:
                 })
                 del self.active_tasks[task_id]
             self._cancel_events.pop(task_id, None)
-            if self._run_lock.locked():
+            # Only release the lock if THIS run acquired it.
+            if lock_held:
                 try:
                     self._run_lock.release()
                 except RuntimeError:
@@ -665,8 +682,15 @@ class SophisticatedTaskOrchestrator:
 
     def _validation_result(self, task: AdvancedTask, state: Optional[PageState],
                            analysis: Dict[str, Any]):
-        """Run the composable validator system and return a ValidationResult."""
-        intent = (analysis or {}).get("intent") or self._intent_for(task)
+        """Run the composable validator system and return a ValidationResult.
+
+        The success condition comes from the deterministic planner
+        (``task.intent``), never from what the model reports back in
+        ``analysis`` - otherwise a misbehaving or injected model could supply
+        an easy condition it also claims to satisfy. The model-reported intent
+        is used only if the planner produced none.
+        """
+        intent = self._intent_for(task) or (analysis or {}).get("intent")
         history = task.context.get("action_history", [])
         extracted = task.context.get("extracted_data", [])
         return validators_mod.validate_completion(intent, state, history, extracted)

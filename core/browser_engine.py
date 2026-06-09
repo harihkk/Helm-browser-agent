@@ -29,6 +29,18 @@ from .url_policy import check_url
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def _is_password_field(field_type: str, autocomplete: str = "") -> bool:
+    """True if an input should be treated as a credential field.
+
+    The agent must never type into these: passwords are entered by the human,
+    not handled by the agent. This also blunts prompt-injection attempts that
+    try to drive the agent into capturing or replaying credentials.
+    """
+    ft = (field_type or "").strip().lower()
+    ac = (autocomplete or "").strip().lower()
+    return ft == "password" or ac in ("current-password", "new-password")
+
+
 # Known browser paths on macOS
 BROWSER_PATHS = {
     'brave': '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
@@ -690,6 +702,22 @@ class AdvancedBrowserEngine:
                 if target is None:
                     return {'success': False, 'action': 'type',
                             'error': f'No typeable element matches: {sel}'}
+                # Never type into a password / credential field. Refuse before
+                # any keystroke reaches the page.
+                try:
+                    field_type = (await target.evaluate(
+                        'el => ((el.getAttribute && el.getAttribute("type")) '
+                        '|| el.type || "").toLowerCase()')) or ''
+                    autocomplete = (await target.evaluate(
+                        'el => (el.autocomplete || "").toLowerCase()')) or ''
+                except Exception:
+                    field_type, autocomplete = '', ''
+                if _is_password_field(field_type, autocomplete):
+                    return {'success': False, 'action': 'type',
+                            'password_field': True,
+                            'error': ('Refusing to type into a password field. '
+                                      'Enter credentials yourself; the agent does '
+                                      'not handle passwords.')}
                 try:
                     await target.click(timeout=4000)
                 except Exception:

@@ -73,19 +73,21 @@ Respond with valid JSON only - no markdown fences, no text outside the JSON:
 # Used once per task to turn ANY phrasing into the opening URL. This is the
 # "understand the request" step - it must be the LLM, not regex, so it works
 # for prompts no rule anticipated.
-INTENT_SYSTEM_PROMPT = """You turn ANY natural-language browser request into the single best URL to open first. Reason about what the user wants and how the web works - there is no fixed list, reason it out each time.
+INTENT_SYSTEM_PROMPT = """You turn ANY natural-language browser request into the single best URL to open first. Reason about what the user means and how the web works - no fixed list, reason it out every time.
 
-Separate INTENT (search, play, watch, open, buy, add, find, read) from CONTENT (the actual thing). Only the CONTENT goes into a query or URL - never the command words and never the site name.
+Separate the INTENT (open, go to, search, play, watch, buy, find, book, read) from the TARGET (the actual company, brand, place, product, or topic). Command words never go into a URL or query.
 
-Pick the destination by reasoning:
-- The user names a site or app -> that site's OWN search-results URL, built the way that site's URLs actually work, with the CONTENT as the query.
-- Watch / play / listen to media -> YouTube search results: https://www.youtube.com/results?search_query=<content>
-- Buy / shop a product -> the brand's own site search if it is a brand product (an Apple product on apple.com, a Pixel on store.google.com), otherwise a major retailer's search (e.g. amazon.com/s?k=<content>).
-- A general question, a bare phrase, or anything with no clear site -> a DuckDuckGo search of the CONTENT: https://duckduckgo.com/html/?q=<content>
-  Use DuckDuckGo, never Google: Google serves automated browsers a CAPTCHA wall.
+Choose the destination, STRONGLY preferring the target's own official website:
+1. If the target is a company, store, restaurant, brand, app, apartment, service, or place you can identify, navigate STRAIGHT to its official website (AMC Theatres -> https://www.amctheatres.com, Raising Cane's -> https://www.raisingcanes.com, a bank/store/brand -> its real domain). Do NOT send a recognizable name to a search engine. If the user wants a specific section (menu, tickets, prices, login), open the most relevant page if you know it, otherwise the home page - the following steps will find the detail on the site itself.
+2. Watch / play / listen to music or video -> YouTube search: https://www.youtube.com/results?search_query=<target>
+3. Shop a product with no specific brand site -> a major retailer: https://www.amazon.com/s?k=<product>
+4. An open-ended question, OR a target whose official site you cannot confidently identify -> a DuckDuckGo search of the user's EXACT words: https://duckduckgo.com/html/?q=<exact target>
+   Use DuckDuckGo, never Google (Google blocks automated browsers).
 
-URL-encode the query. Output JSON only, nothing else:
-{"task_type":"...","target_site":"<canonical domain or ''>","content":"<the thing only - no commands, no site name>","start_url":"<one https URL to open first>","success_condition":"<what visible page state proves the task is done>"}"""
+CRITICAL: never replace the user's named target with a different real entity you happen to know. If you are not sure of the exact website, SEARCH the user's exact name (rule 4) - do not invent a domain and do not substitute a similar-sounding company or place. Preserve the user's actual words.
+
+URL-encode the query. Output JSON only:
+{"task_type":"...","target_site":"<domain or ''>","content":"<the target only - no command words>","start_url":"<one https URL to open first>","success_condition":"<what visible page state proves it's done>"}"""
 
 try:
     from groq import Groq
@@ -291,13 +293,14 @@ class GroqAIAgent:
         if blocked:
             return blocked
 
-        # FIRST step on a blank page: the LLM decides the opening route from the
-        # raw request. This is the part that must work for ANY prompt, so it is
-        # model-driven, not regex. The deterministic planner remains the
-        # fallback (no key / quota) and drives the on-site steps that follow.
+        # FIRST step of a NEW task: the LLM decides the opening route from the
+        # raw request. Gated on empty history (not on the URL) so a fresh task
+        # still routes correctly even when the shared browser is sitting on a
+        # leftover page from the previous task. Model-driven, not regex; the
+        # deterministic planner remains the fallback (no key / quota) and drives
+        # the on-site steps that follow.
         history = context.get('action_history', []) or []
-        cur_url = (page_state or {}).get('url', '') or ''
-        if not history and cur_url in ('', 'about:blank', 'error'):
+        if not history:
             routed = await self._llm_first_route(task_goal)
             if routed:
                 return routed

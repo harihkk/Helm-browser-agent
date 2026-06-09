@@ -50,7 +50,6 @@ ACTION_SPECS: Dict[str, ActionSpec] = {
     "ensure_youtube_playback": ActionSpec("ensure_youtube_playback", ("query",), "Validate/start YouTube playback", ("validate_media_playing",)),
     "write_google_keep_note": ActionSpec("write_google_keep_note", ("text",), "Create a Google Keep note", ("validate_note_created",)),
     "open_first_github_code_result": ActionSpec("open_first_github_code_result", (), "Open first GitHub code search result"),
-    "configure_apple_product": ActionSpec("configure_apple_product", ("product",), "Configure an Apple product", ("validate_product_configured",)),
     "add_amazon_item_to_cart": ActionSpec("add_amazon_item_to_cart", ("query",), "Add Amazon product result to cart", ("validate_cart_updated",)),
 
     # Canonical planner concepts. These are registry-visible so planners can
@@ -66,7 +65,6 @@ ACTION_SPECS: Dict[str, ActionSpec] = {
     "validate_text_visible": ActionSpec("validate_text_visible", ("text",), "Validate text is visible", executable=False),
     "validate_media_playing": ActionSpec("validate_media_playing", (), "Validate media playback", executable=False),
     "validate_note_created": ActionSpec("validate_note_created", ("text",), "Validate note was created", executable=False),
-    "validate_product_configured": ActionSpec("validate_product_configured", (), "Validate product configuration", executable=False),
     "validate_cart_updated": ActionSpec("validate_cart_updated", (), "Validate cart state", executable=False),
     "recover_from_error_page": ActionSpec("recover_from_error_page", (), "Recover from page error", executable=False),
     "report_blocker": ActionSpec("report_blocker", ("blocker_type", "blocker_message"), "Report blocker", executable=False),

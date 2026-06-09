@@ -112,6 +112,7 @@ class IntentPlanner:
         "stackoverflow": "stackoverflow.com",
         "stack overflow": "stackoverflow.com",
         "amazon": "amazon.com",
+        "apple": "apple.com",
         "hacker news": "news.ycombinator.com",
         "ycombinator": "news.ycombinator.com",
         "news.ycombinator": "news.ycombinator.com",
@@ -151,7 +152,6 @@ class IntentPlanner:
 
         for planner in (
             self._plan_google_keep,
-            self._plan_apple_product_config,
             self._plan_amazon_cart,
             self._plan_youtube_media,
             self._plan_github_repo_search,
@@ -226,13 +226,12 @@ class IntentPlanner:
             requires_confirmation = task_type == "cart_update"
             allowed_actions += ["add_amazon_item_to_cart", "validate_cart_updated"]
         elif "iphone" in low and ("apple" in low or "apply" in low):
-            task_type = "product_configuration"
+            # No hardcoded Apple product-page slugs - they 404 and rot every
+            # product cycle. Treat this as a site search and let the agent open
+            # the real page and extract the price.
+            task_type = "site_search"
             target_site = "apple.com"
-            entity_or_object = self._extract_iphone_model(original) or "iPhone"
-            storage = self._extract_storage(original)
-            if storage:
-                constraints["storage"] = storage
-            allowed_actions += ["configure_apple_product", "validate_product_configured"]
+            search_query = self._extract_site_query(original, "apple.com")
         elif target_url:
             task_type = "navigation" if not any(w in low for w in ("search", "find", "look")) else "site_search"
             search_query = self._extract_query_around_url(original, target_url)
@@ -339,8 +338,6 @@ class IntentPlanner:
             return f"Repo-scoped search results for {query} in {entity} are visible, or a no-results/blocker state is reported."
         if task_type == "cart_update":
             return f"A cart confirmation for the exact requested product ({query or entity}) is visible; optional review/navigation requirements are also satisfied."
-        if task_type == "product_configuration":
-            return f"The requested product configuration for {entity} is selected and price/unavailability is visible."
         if task_type == "site_search":
             return f"Results scoped to {target_site or target_url} for {query} are visible, or no-results/blocker is reported."
         if task_type == "web_search":
@@ -360,7 +357,6 @@ class IntentPlanner:
             "note_creation": "validate_note_created",
             "repo_search": "validate_text_visible",
             "cart_update": "validate_cart_updated",
-            "product_configuration": "validate_product_configured",
             "site_search": "validate_text_visible",
             "web_search": "validate_text_visible",
             "navigation": "validate_url",
@@ -373,7 +369,6 @@ class IntentPlanner:
             "note_creation": "A saved note containing the requested text.",
             "repo_search": "Repository-scoped code search results.",
             "cart_update": "A cart confirmation for the verified product.",
-            "product_configuration": "The configured product with a visible price.",
             "site_search": "Search results scoped to the target site.",
             "web_search": "Web search results for the cleaned query.",
             "navigation": "The requested page loaded without error.",
@@ -499,84 +494,6 @@ class IntentPlanner:
             reasoning="Open Google Keep before creating the requested note.",
             thinking="Google Keep note intent detected.",
             confidence=0.9,
-        )
-
-    def _plan_apple_product_config(self, goal: str, state: Dict, history: List[Dict]) -> Optional[IntentAction]:
-        goal_lower = goal.lower()
-        if "iphone" not in goal_lower:
-            return None
-        if "apple" not in goal_lower and "iphone" not in goal_lower:
-            return None
-        wants_config = any(
-            word in goal_lower
-            for word in ("price", "config", "configure", "storage", "gb", "tb", "model")
-        )
-        if not wants_config:
-            return None
-
-        model = self._extract_iphone_model(goal) or "iPhone 16"
-        storage = self._extract_storage(goal)
-        current = state.get("url", "")
-        parsed = urlparse(current)
-        current_host = parsed.netloc.lower().removeprefix("www.")
-        current_path = parsed.path.lower()
-
-        last = history[-1] if history else {}
-        if last.get("action") == "configure_apple_product" and last.get("success"):
-            return IntentAction(
-                action="done",
-                parameters={"summary": f"Configured {model}{(' ' + storage) if storage else ''} on Apple."},
-                reasoning="The Apple product configuration action completed successfully.",
-                thinking="Apple product configuration is complete.",
-                confidence=0.9,
-                task_complete=True,
-            )
-
-        target = f"https://www.apple.com/shop/buy-iphone/{self._iphone_buy_slug(model)}"
-        target_path = urlparse(target).path.lower().rstrip("/")
-        page_text = f"{state.get('title', '')} {state.get('content', '')}".lower()
-        apple_404 = "page not found" in page_text
-
-        if current_host.endswith("apple.com") and "/shop/buy-iphone" in current_path:
-            if apple_404 or current_path.rstrip("/") != target_path:
-                return IntentAction(
-                    action="navigate",
-                    parameters={"url": target},
-                    reasoning="Recover from the wrong Apple buy URL by opening the correct product family page.",
-                    thinking=f"Apple buy page is wrong or not found; navigating to {target}.",
-                    confidence=0.92,
-                )
-            price_summary = self._apple_price_summary_from_content(
-                model, storage, state.get("content", ""))
-            if price_summary:
-                return IntentAction(
-                    action="done",
-                    parameters={"summary": price_summary},
-                    reasoning="The Apple buy page already shows the requested configuration price.",
-                    thinking="Requested Apple price is visible in page content.",
-                    confidence=0.9,
-                    task_complete=True,
-                )
-            params = {"product": "iphone", "model": model}
-            if storage:
-                params["storage"] = storage
-            return IntentAction(
-                action="configure_apple_product",
-                parameters=params,
-                reasoning=(
-                    f"Configure the Apple buy page for {model}"
-                    f"{(' with ' + storage + ' storage') if storage else ''} and read the price."
-                ),
-                thinking="Apple buy page is open; configure the requested option and extract price.",
-                confidence=0.9,
-            )
-
-        return IntentAction(
-            action="navigate",
-            parameters={"url": target},
-            reasoning=f"Navigate directly to Apple's buy page for {model}.",
-            thinking=f"Apple iPhone configuration intent detected: {model}.",
-            confidence=0.92,
         )
 
     def _plan_amazon_cart(self, goal: str, state: Dict, history: List[Dict]) -> Optional[IntentAction]:
@@ -1201,99 +1118,6 @@ class IntentPlanner:
                     confidence=0.84,
                 )
         return None
-
-    # ------------------------------------------------------------------ #
-    # GitHub parsing
-    # ------------------------------------------------------------------ #
-
-    def _extract_iphone_model(self, goal: str) -> str:
-        goal_lower = goal.lower()
-        match = re.search(
-            r'\biphone\s*(\d{1,2})(?:\s*(pro\s*max|pro|plus))?\b',
-            goal,
-            flags=re.I,
-        )
-        if not match:
-            if re.search(r'\biphone\s+plus\b', goal_lower):
-                return "iPhone 16 Plus"
-            if re.search(r'\biphone\s+pro\s+max\b', goal_lower):
-                return "iPhone 16 Pro Max"
-            if re.search(r'\biphone\s+pro\b', goal_lower):
-                return "iPhone 16 Pro"
-            return ""
-        number = match.group(1)
-        suffix = " ".join((match.group(2) or "").title().split())
-        return f"iPhone {number}{(' ' + suffix) if suffix else ''}"
-
-    def _extract_storage(self, goal: str) -> str:
-        match = re.search(r'\b(\d+)\s*(gb|tb)\b', goal, flags=re.I)
-        if not match:
-            return ""
-        return f"{match.group(1)}{match.group(2).upper()}"
-
-    def _iphone_buy_slug(self, model: str) -> str:
-        """Map an iPhone model to its Apple buy-page slug.
-
-        Apple groups models onto shared configuration pages: the base and Plus
-        models live on /iphone-<n>, and the Pro and Pro Max models live on
-        /iphone-<n>-pro. There is no /iphone-<n>-pro-max page - it returns 404 -
-        so Pro Max collapses to the -pro slug, just as Plus collapses to the
-        base slug.
-        """
-        num_match = re.search(r'\d+', model or '')
-        if num_match:
-            num = num_match.group(0)
-            if "pro" in (model or '').lower():
-                return f"iphone-{num}-pro"
-            return f"iphone-{num}"
-        # No version number: fall back to a cleaned slug.
-        clean = re.sub(r'\s+', '-',
-                       (model or '').lower().replace("iphone", "iphone-").strip())
-        return re.sub(r'-+', '-', clean)
-
-    def _apple_price_summary_from_content(self, model: str, storage: str, content: str) -> str:
-        if not content:
-            return ""
-        normalized = re.sub(r'\s+', ' ', content)
-        wanted_storage = storage.replace(" ", "")
-        if wanted_storage:
-            storage_pat = re.escape(wanted_storage).replace("GB", r"\s*GB").replace("TB", r"\s*TB")
-            chunks = re.findall(
-                rf'(.{{0,120}}{storage_pat}.{{0,220}})',
-                normalized,
-                flags=re.I,
-            )
-        else:
-            chunks = re.findall(
-                rf'(.{{0,80}}{re.escape(model)}.{{0,180}})',
-                normalized,
-                flags=re.I,
-            )
-
-        for chunk in chunks:
-            if model and model.lower() not in chunk.lower() and wanted_storage:
-                model_nearby = re.search(re.escape(model), normalized, flags=re.I)
-                if not model_nearby:
-                    continue
-            search_area = chunk
-            if wanted_storage:
-                storage_match = re.search(storage_pat, chunk, flags=re.I)
-                if storage_match:
-                    search_area = chunk[storage_match.end():]
-            price = re.search(r'(?:from\s*)?(\$[\d,]+(?:\.\d{2})?)', search_area, flags=re.I)
-            if not price:
-                continue
-            monthly = re.search(
-                r'(\$[\d,]+(?:\.\d{2})?\s*/mo\.?(?:\s*[^.]{0,40})?)',
-                search_area,
-                flags=re.I,
-            )
-            label = " ".join(part for part in (model, wanted_storage) if part)
-            summary = f"{label}: {price.group(1)}"
-            if monthly:
-                summary += f" ({monthly.group(1).strip()})"
-            return summary
-        return ""
 
     def _extract_cart_query(self, goal: str) -> str:
         text = goal.strip()

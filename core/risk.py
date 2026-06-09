@@ -46,7 +46,7 @@ HIGH_IMPACT_FAMILIES = frozenset({
 # require confirmation regardless of verb keywords.
 SAFE_FAMILIES = frozenset({
     "navigation", "web_search", "site_search", "media_playback",
-    "note_creation", "information_extraction", "product_configuration",
+    "note_creation", "information_extraction",
     "repo_search",
 })
 

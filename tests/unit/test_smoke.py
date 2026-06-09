@@ -132,16 +132,15 @@ class QuickActionRouting(unittest.TestCase):
         self.assertEqual(intent.entity_or_object, "harihkk/helm")
         self.assertEqual(intent.search_query, "auth logic")
 
-    def test_structured_intent_extracts_product_constraints(self):
+    def test_apple_iphone_intent_is_a_site_search(self):
         from core.intent_planner import IntentPlanner
 
         intent = IntentPlanner().parse_intent(
             "go to apply website and look for iphone plus 512 gb variant and sow em the final price"
         )
-        self.assertEqual(intent.task_type, "product_configuration")
+        self.assertEqual(intent.task_type, "site_search")
         self.assertEqual(intent.target_site, "apple.com")
-        self.assertEqual(intent.constraints["storage"], "512GB")
-        self.assertIn("iPhone 16 Plus", intent.entity_or_object)
+        self.assertIn("iphone", intent.search_query.lower())
 
     def test_amazon_ipad_prompt_extracts_exact_product_and_reviews(self):
         from core.intent_planner import IntentPlanner
@@ -294,88 +293,22 @@ class QuickActionRouting(unittest.TestCase):
         self.assertEqual(action["action"], "open_first_search_result")
         self.assertEqual(action["parameters"]["domain"], "reddit.com")
 
-    def test_apple_iphone_storage_price_routes_to_configurator(self):
-        from core.intent_planner import IntentPlanner
-
-        planner = IntentPlanner()
-        first = planner.plan(
-            "open apple website and look for iphone 16 and show me the 256 gb config model price",
-            {"url": "about:blank"},
-        )
-        self.assertEqual(first["action"], "navigate")
-        self.assertEqual(
-            first["parameters"]["url"],
-            "https://www.apple.com/shop/buy-iphone/iphone-16",
-        )
-
-        second = planner.plan(
-            "open apple website and look for iphone 16 and show me the 256 gb config model price",
-            {"url": "https://www.apple.com/shop/buy-iphone/iphone-16"},
-        )
-        self.assertEqual(second["action"], "configure_apple_product")
-        self.assertEqual(second["parameters"]["model"], "iPhone 16")
-        self.assertEqual(second["parameters"]["storage"], "256GB")
-
-    def test_apple_iphone_plus_uses_shared_family_buy_page(self):
-        from core.intent_planner import IntentPlanner
-
-        planner = IntentPlanner()
-        first = planner.plan(
-            "go to apply website and look for iphone plus 512 gb variant and sow em the final price",
-            {"url": "about:blank"},
-        )
-        self.assertEqual(first["action"], "navigate")
-        self.assertEqual(
-            first["parameters"]["url"],
-            "https://www.apple.com/shop/buy-iphone/iphone-16",
-        )
-
-        second = planner.plan(
-            "go to apple website and look for iphone plus 512 gb variant and show me the final price",
-            {"url": "https://www.apple.com/shop/buy-iphone/iphone-16"},
-        )
-        self.assertEqual(second["action"], "configure_apple_product")
-        self.assertEqual(second["parameters"]["model"], "iPhone 16 Plus")
-        self.assertEqual(second["parameters"]["storage"], "512GB")
-
-    def test_apple_page_not_found_recovers_to_correct_buy_page(self):
+    def test_apple_iphone_price_routes_to_search_not_a_hardcoded_slug(self):
+        # Durability: no hardcoded /shop/buy-iphone slug table (those 404 and
+        # rot every product cycle). The query routes to a site-scoped search
+        # and the agent extracts the price from the real page.
         from core.intent_planner import IntentPlanner
 
         planner = IntentPlanner()
         action = planner.plan(
-            "go to apple website and look for iphone 16 plus 512 gb variant and show me the price",
-            {
-                "url": "https://www.apple.com/shop/buy-iphone/iphone-16-plus",
-                "title": "Page Not Found",
-                "content": "Page Not Found Apple Store footer",
-            },
+            "open apple website and look for iphone 16 and show me the 256 gb config model price",
+            {"url": "about:blank"},
         )
         self.assertEqual(action["action"], "navigate")
-        self.assertEqual(
-            action["parameters"]["url"],
-            "https://www.apple.com/shop/buy-iphone/iphone-16",
-        )
-
-    def test_apple_visible_price_completes_task(self):
-        from core.intent_planner import IntentPlanner
-
-        planner = IntentPlanner()
-        action = planner.plan(
-            "open apple website and look for iphone 16 and show me the 256 gb config model price",
-            {
-                "url": "https://www.apple.com/shop/buy-iphone/iphone-16",
-                "title": "Buy iPhone 16 and iPhone 16 Plus - Apple",
-                "content": (
-                    "Model. Which is best for you? iPhone 16 From $699 "
-                    "Storage. How much space do you need? "
-                    "128 GB From $699 or $29.12/mo. for 24 mo. "
-                    "256 GB From $899 or $37.45/mo. for 24 mo."
-                ),
-            },
-            [{"action": "extract", "success": True}],
-        )
-        self.assertEqual(action["action"], "done")
-        self.assertIn("iPhone 16 256GB: $899", action["parameters"]["summary"])
+        url = action["parameters"]["url"]
+        self.assertIn("google.com/search", url)
+        self.assertIn("apple.com", url)
+        self.assertNotIn("/shop/buy-iphone", url)
 
     def test_amazon_add_to_cart_routes_to_search_then_cart_action(self):
         from core.intent_planner import IntentPlanner
@@ -680,7 +613,7 @@ class ActionRegistryAndGuards(unittest.TestCase):
             "press_key", "wait_for_selector", "extract_text", "select_option",
             "observe_page", "validate_url", "validate_text_visible",
             "validate_media_playing", "validate_note_created",
-            "validate_product_configured", "validate_cart_updated",
+            "validate_cart_updated",
             "recover_from_error_page", "report_blocker",
         ]
         for name in required:

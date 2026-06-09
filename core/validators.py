@@ -211,11 +211,6 @@ def validate_completion(intent: Dict, state: Any, history: List[Dict],
     if task_type == "cart_update":
         return _validate_cart(intent, state, history)
 
-    if task_type == "product_configuration":
-        if _step_succeeded(history, "configure_apple_product"):
-            return ValidationResult(COMPLETED, "Product configuration workflow validated the outcome.")
-        return ValidationResult(UNVERIFIED, "Product configuration was not confirmed.")
-
     if task_type == "information_extraction":
         if extracted or (history and history[-1].get("action") == "extract"):
             return ValidationResult(COMPLETED, "Page content was extracted.",

@@ -310,12 +310,16 @@ class SophisticatedTaskOrchestrator:
                 if self._is_cancelled(cancel_event):
                     break
 
-                # -- Risk / confirmation gate. High-impact actions (cart,
-                #    submit, send, delete, ...) pause for explicit confirmation
-                #    unless the run was started pre-confirmed. --
-                if (not task.options.get('confirmed')
-                        and risk_layer.action_requires_confirmation(
-                            action_type, params, intent)):
+                # -- Risk / confirmation gate. Only the action that finalizes a
+                #    payment/order/submit pauses for confirmation: the model
+                #    flags it (requires_confirmation), and a deterministic
+                #    commit-signal check is the safety net. Cookie banners,
+                #    searches, and option-picking flow through. --
+                needs_confirm = (
+                    bool(analysis.get('requires_confirmation'))
+                    or risk_layer.action_requires_confirmation(
+                        action_type, params, intent))
+                if not task.options.get('confirmed') and needs_confirm:
                     blocker = blocker_mod.confirmation_blocker(
                         risk_layer.confirmation_message(intent),
                         url=page_state.url if page_state else '',

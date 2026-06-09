@@ -70,25 +70,45 @@ def classify_risk(text: str, task_type: str = "") -> Dict:
     return {"risk_level": "low", "requires_confirmation": False}
 
 
-def action_requires_confirmation(action: str, params: Dict, intent: Dict) -> bool:
-    """Should the executor pause before running ``action`` for this intent?
+# Surface signals that THIS specific action finalizes a payment/order/send -
+# the only point a confirmation should interrupt. Deliberately excludes early,
+# reversible steps like "book now"/"search"/"add to cart" so the agent can work
+# through the flow (dismiss cookies, search, pick a flight) without nagging.
+_COMMIT_SIGNALS = (
+    "pay now", "pay ", "pay&", "place order", "place your order",
+    "complete purchase", "complete booking", "complete order",
+    "confirm and pay", "confirm payment", "confirm purchase", "confirm order",
+    "confirm booking", "confirm and book", "submit payment", "submit order",
+    "buy now", "purchase now", "proceed to payment", "make payment", "checkout",
+    "check out",
+)
 
-    True only for genuinely high-impact actions. Navigation, search, extract,
-    scroll, typing into a requested note, etc. never trip this.
+
+def _looks_like_commit(params: Dict) -> bool:
+    """True if the action's target reads like the final pay/place-order step."""
+    params = params or {}
+    blob = " ".join(
+        str(params.get(k, "")) for k in
+        ("text", "label", "aria_label", "name", "selector", "value")
+    ).lower()
+    blob = f" {blob} "
+    return any(sig in blob for sig in _COMMIT_SIGNALS)
+
+
+def action_requires_confirmation(action: str, params: Dict, intent: Dict) -> bool:
+    """Should the executor pause before running ``action``?
+
+    Confirmation interrupts ONLY the action that actually finalizes a payment,
+    order, or irreversible submit - never the cookie banners, searches,
+    navigation, or option-picking that lead up to it, even inside a high-impact
+    task like booking a flight.
     """
     intent = intent or {}
     if action in HIGH_IMPACT_ACTIONS:
         return True
-    if not intent.get("requires_confirmation"):
-        return False
-    # The intent is flagged high-impact; gate the action that actually performs
-    # the mutation (submit/select on a form, the cart action), not the
-    # navigation/search/extract steps that lead up to it.
-    if action in ("navigate", "extract", "scroll", "wait", "press_key", "done"):
-        return False
     if action in ("click", "type", "select", "submit"):
-        return True
-    return action not in ("observe_page",)
+        return _looks_like_commit(params)
+    return False
 
 
 def confirmation_message(intent: Dict) -> str:

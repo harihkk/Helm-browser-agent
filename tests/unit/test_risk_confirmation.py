@@ -63,14 +63,25 @@ class ActionGate(unittest.TestCase):
         for a in ("navigate", "extract", "scroll", "wait", "press_key", "done"):
             self.assertFalse(R.action_requires_confirmation(a, {}, intent), a)
 
-    def test_mutating_actions_gated_for_high_risk_intent(self):
+    def test_only_the_commit_action_is_gated(self):
         intent = {"requires_confirmation": True}
-        for a in ("click", "type", "select", "submit"):
-            self.assertTrue(R.action_requires_confirmation(a, {}, intent), a)
+        # The genuine pay / place-order / confirm step pauses...
+        for params in ({"text": "Pay now"}, {"text": "Place order"},
+                       {"selector": "#confirm-and-pay"}, {"text": "Buy now"},
+                       {"text": "Proceed to payment"}):
+            self.assertTrue(R.action_requires_confirmation("click", params, intent), params)
+        # ...but cookie banners, searches, and option-picking flow freely, even
+        # inside a high-impact task like booking a flight.
+        for params in ({}, {"selector": "#cookie-accept"}, {"text": "Accept"},
+                       {"selector": "#search-flights"}, {"text": "Search flights"},
+                       {"text": "Select this flight"}):
+            self.assertFalse(R.action_requires_confirmation("click", params, intent), params)
 
-    def test_no_gate_for_low_risk_intent(self):
+    def test_no_gate_for_low_risk_non_commit_action(self):
         intent = {"requires_confirmation": False}
         self.assertFalse(R.action_requires_confirmation("click", {}, intent))
+        # A pay click is gated regardless of the task's overall risk.
+        self.assertTrue(R.action_requires_confirmation("click", {"text": "Pay now"}, intent))
 
     def test_confirmation_message_non_empty(self):
         self.assertTrue(R.confirmation_message({"task_type": "cart_update", "search_query": "ipad"}))

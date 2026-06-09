@@ -7,7 +7,7 @@ Persistence for tasks, steps, templates, recordings, workflows, and scheduled ta
 import json
 import logging
 import aiosqlite
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 from datetime import datetime
 
 logger = logging.getLogger(__name__)

@@ -7,7 +7,7 @@ Record browser automation sessions and export as Python scripts or JSON workflow
 import json
 import uuid
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from datetime import datetime
 
 logger = logging.getLogger(__name__)

@@ -9,7 +9,7 @@ import csv
 import io
 import json
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 
 logger = logging.getLogger(__name__)
 

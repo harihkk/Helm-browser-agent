@@ -13,7 +13,7 @@ from typing import Dict, List, Any, Optional, AsyncGenerator, Tuple
 from datetime import datetime
 from enum import Enum
 
-from .ai_agent import GroqAIAgent, ActionPlan, ActionType
+from .ai_agent import GroqAIAgent
 from .browser_engine import AdvancedBrowserEngine, PageState
 from . import blockers as blocker_mod
 from . import validators as validators_mod

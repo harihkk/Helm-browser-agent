@@ -5,7 +5,7 @@ not understand. This module is intentionally deterministic and free of model
 calls so tests can catch unsupported planner output early.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import re
 from typing import Dict, Iterable, List, Tuple
 

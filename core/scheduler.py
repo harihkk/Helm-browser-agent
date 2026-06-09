@@ -7,7 +7,7 @@ Cron-style scheduling for recurring automations.
 import asyncio
 import logging
 import uuid
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)

@@ -75,7 +75,7 @@ PRODUCT_DOMAIN_SIGNALS = [
 # or site is named. Single source of truth: the verbs that also lived in
 # ACTION_VERBS["submit"] (buy/order/purchase) are removed from there.
 PURCHASE_VERBS = frozenset({
-    "buy", "order", "purchase", "get me", "find me",
+    "buy", "order", "purchase", "get me", "find me", "add to cart",
     "price of", "cost of", "how much is", "how much does", "cheapest",
 })
 

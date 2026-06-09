@@ -215,14 +215,14 @@ class IntentPlanner:
             # intent beats purchase intent (this branch comes first).
             task_type = "media_playback"
             target_site = "youtube.com"
-            search_query = self._clean_command_text(normalized)
+            search_query = self._extract_youtube_media_query(original)
             allowed_actions += ["play_youtube_result", "ensure_youtube_playback", "validate_media_playing"]
         elif inferred_domain and (not target_site or target_site == inferred_domain):
             # A product/brand signal (iphone, galaxy, pixel, ...) implies the
             # destination domain even when the user never names the site.
             task_type = "site_search"
             target_site = inferred_domain
-            search_query = self._clean_command_text(normalized)
+            search_query = self._extract_site_query(original, inferred_domain)
             entity_or_object = search_query
         elif "youtube" in low and any(w in low for w in ("play", "watch", "listen", "search", "find")):
             task_type = "media_playback"
@@ -1497,6 +1497,8 @@ class IntentPlanner:
             return path.startswith("/results")
         if domain in ("stackoverflow.com", "amazon.com", "medium.com"):
             return path.startswith("/search") or path.startswith("/s")
+        if domain == "apple.com":
+            return path.startswith("/search")
         return False
 
     def _extract_linkedin_query(self, goal: str) -> str:

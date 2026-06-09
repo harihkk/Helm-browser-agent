@@ -60,6 +60,13 @@ and writing into a note you explicitly asked for run without a prompt. Walls
 that cannot be automated (sign-in, captcha, 404, no results) are reported as
 structured blockers, not faked completions.
 
+Every navigation passes an SSRF guard (`core/url_policy.py`) before the browser
+opens it. The agent picks URLs from untrusted page text, so by default it
+refuses non-http(s) schemes (`file:`, `data:`, ...), private and loopback
+addresses, and cloud metadata endpoints (which are always blocked). To automate
+a local app you trust, set `HELM_ALLOW_PRIVATE_HOSTS=true`; scope reachable
+sites with `HELM_URL_ALLOWLIST` / `HELM_URL_DENYLIST`.
+
 ## Provider cascade
 
 Free-tier APIs run out. The agent tries each layer in order:

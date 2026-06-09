@@ -24,6 +24,7 @@ from .action_registry import (
     validate_action,
     validate_text_payload,
 )
+from .url_policy import check_url
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -645,6 +646,15 @@ class AdvancedBrowserEngine:
         if action_type == 'navigate':
             url = params.get('url', '')
             if url:
+                # SSRF guard: the URL may have been chosen under the influence
+                # of untrusted page content. Block local/metadata/non-http
+                # targets before we ever hand the URL to the browser.
+                verdict = check_url(url)
+                if not verdict.allowed:
+                    return {'success': False, 'action': 'navigate',
+                            'error': f'Blocked unsafe URL: {verdict.reason}',
+                            'blocked_url': True,
+                            'block_category': verdict.category}
                 # _smart_wait already waits for DOM + networkidle. No extra sleep.
                 await page.goto(url, timeout=25000, wait_until='domcontentloaded')
                 await self._smart_wait(page)

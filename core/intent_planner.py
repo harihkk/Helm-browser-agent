@@ -1232,11 +1232,23 @@ class IntentPlanner:
         return f"{match.group(1)}{match.group(2).upper()}"
 
     def _iphone_buy_slug(self, model: str) -> str:
-        if re.fullmatch(r'iPhone\s+\d+\s+Plus', model, flags=re.I):
-            base = re.search(r'\d+', model).group(0)
-            return f"iphone-{base}"
-        clean = model.lower().replace("iphone", "iphone-")
-        clean = re.sub(r'\s+', '-', clean.strip())
+        """Map an iPhone model to its Apple buy-page slug.
+
+        Apple groups models onto shared configuration pages: the base and Plus
+        models live on /iphone-<n>, and the Pro and Pro Max models live on
+        /iphone-<n>-pro. There is no /iphone-<n>-pro-max page - it returns 404 -
+        so Pro Max collapses to the -pro slug, just as Plus collapses to the
+        base slug.
+        """
+        num_match = re.search(r'\d+', model or '')
+        if num_match:
+            num = num_match.group(0)
+            if "pro" in (model or '').lower():
+                return f"iphone-{num}-pro"
+            return f"iphone-{num}"
+        # No version number: fall back to a cleaned slug.
+        clean = re.sub(r'\s+', '-',
+                       (model or '').lower().replace("iphone", "iphone-").strip())
         return re.sub(r'-+', '-', clean)
 
     def _apple_price_summary_from_content(self, model: str, storage: str, content: str) -> str:

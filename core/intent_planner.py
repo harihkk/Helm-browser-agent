@@ -135,6 +135,30 @@ class IntentPlanner:
         "store.google.com": "https://store.google.com/us/category/phones?q={query}",
     }
 
+    # Any bare domain token (reddit.com, amazon.com, store.google.com, ...) so a
+    # site name typed in the prompt never leaks into the search query.
+    _BARE_DOMAIN_RE = re.compile(
+        r'\b(?:[a-z0-9-]+\.)+(?:com|org|net|io|co|gov|edu|us|uk|app|dev|ai|tv|me)\b',
+        re.I)
+    # When one of these separates the command from the payload, keep only the
+    # text after it ("...and look for X" -> "X").
+    _QUERY_CONNECTIVES = ("searching for", "search for", "look for", "look up")
+    # Command/scaffolding/question words stripped from the EDGES of a query only
+    # (never the middle), so descriptive words and titles survive. Adjectives
+    # like best/good/cheap/new are deliberately NOT here - the user means them.
+    _QUERY_FILLER = frozenset({
+        "can", "cna", "cn", "u", "you", "please", "plz", "pls", "go", "got", "o",
+        "goto", "to", "open", "navigate", "visit", "launch", "search", "searching",
+        "look", "looking", "find", "finding", "for", "about", "me", "my", "i",
+        "want", "wanna", "need", "gonna", "the", "a", "an", "and", "then", "show",
+        "read", "summarize", "summarise", "extract", "scrape", "from", "site",
+        "website", "page", "url", "buy", "order", "purchase", "get", "getting",
+        "whats", "what", "hows", "how", "much", "is", "price", "cost", "of", "on",
+        "at", "just", "actually", "really", "play", "watch", "watching", "listen",
+        "stream", "youtube", "inside", "within", "add", "cart", "basket",
+        "some", "soem",
+    })
+
     GITHUB_STOP_WORDS = {
         "github", "profile", "user", "account", "look", "for", "find",
         "open", "go", "to", "and", "search", "visit", "the", "a", "an",
@@ -324,25 +348,48 @@ class IntentPlanner:
         return match.group(0).rstrip(").],!?;:\"'") if match else ""
 
     def _extract_query_around_url(self, goal: str, url: str) -> str:
-        query = re.sub(re.escape(url), " ", goal, flags=re.I)
-        query = re.sub(
-            r"\b(?:can|you|please|go|to|open|inside|within|in|search|look|find|for|repo|repository|site|page|url|and|the|a|an)\b",
-            " ",
-            query,
-            flags=re.I,
-        )
-        return re.sub(r"\s+", " ", query).strip(" .,:;")
+        # Remove the URL itself, then run the one cleaner. "repo/repository" are
+        # dropped here since they are scaffolding specific to URL-bearing goals.
+        text = re.sub(re.escape(url), " ", goal, flags=re.I)
+        text = re.sub(r"\b(?:repo|repository)\b", " ", text, flags=re.I)
+        return self._clean_query(text)
+
+    def _clean_query(self, goal: str) -> str:
+        """The one query cleaner. Deterministic and phrasing-robust:
+
+        1. Drop full URLs and any bare domain token (so "reddit.com" never
+           leaks into the search text).
+        2. If a search connective separates the command from the payload, keep
+           only the payload ("...and look for X" -> "X").
+        3. Strip command/scaffolding words from the EDGES only, never the middle,
+           so descriptive words and multi-word titles survive.
+        """
+        text = re.sub(r'https?://[^\s,)]+', " ", goal or "", flags=re.I)
+        text = self._BARE_DOMAIN_RE.sub(" ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+
+        low = text.lower()
+        cut = 0
+        for connective in self._QUERY_CONNECTIVES:
+            idx = low.find(connective)
+            if idx >= 0:
+                cut = max(cut, idx + len(connective))
+        if cut:
+            text = text[cut:]
+
+        tokens = [t for t in text.split(" ") if t]
+        while tokens and tokens[0].lower().strip(".,:;!?'\"") in self._QUERY_FILLER:
+            tokens.pop(0)
+        while tokens and tokens[-1].lower().strip(".,:;!?'\"") in self._QUERY_FILLER:
+            tokens.pop()
+        cleaned = " ".join(tokens).strip(" .,:;!?")
+        # If edge-stripping emptied it (an all-scaffolding prompt), fall back to
+        # the domain-stripped text so we never hand back an empty query.
+        return cleaned or text.strip(" .,:;!?")
 
     def _clean_command_text(self, goal: str) -> str:
-        text = goal or ""
-        text = re.sub(r'https?://[^\s,)]+', " ", text, flags=re.I)
-        text = re.sub(
-            r"\b(?:can|cna|you|u|please|plz|go|got|o|to|up|over|open|navigate|visit|search|look|find|for|me|the|web|google|inside|within|in|and|actually|show|read|extract|from|site|website)\b",
-            " ",
-            text,
-            flags=re.I,
-        )
-        return re.sub(r"\s+", " ", text).strip(" .,:;")
+        # Back-compat shim: the single cleaner is _clean_query.
+        return self._clean_query(goal)
 
     def _success_condition_for(self, task_type: str, target_site: str, query: str,
                                content: str, entity: str, target_url: str) -> str:
@@ -943,6 +990,10 @@ class IntentPlanner:
         )
         if not searchish:
             return None
+        # "search amazon for X" names a site with its own search route - defer
+        # to the direct-site planner instead of a generic Google web search.
+        if self._extract_target_domain(goal) in self.DIRECT_SITE_SEARCHES:
+            return None
         query = self._extract_search_query(goal, ("google", "search", "the web", "web", "look up"))
         if not query:
             return None
@@ -1173,13 +1224,9 @@ class IntentPlanner:
             flags=re.I,
         )
         query = re.sub(r'\s+reviews?\b.*$', ' ', query, flags=re.I)
-        query = re.sub(
-            r'\b(?:go|to|amazon|and|add|cart|basket|my|please|plz|some|soem)\b',
-            ' ',
-            query,
-            flags=re.I,
-        )
-        return re.sub(r'\s+', ' ', query).strip()
+        # Final pass through the one shared cleaner (drops "me a good", leading
+        # command words, leaked domains, ...).
+        return self._clean_query(query)
 
     def _extract_amazon_constraints(self, goal: str, query: str) -> Dict:
         low = self._normalize_prompt(goal).lower()
@@ -1240,28 +1287,16 @@ class IntentPlanner:
         return constraints
 
     def _extract_youtube_media_query(self, goal: str) -> str:
-        text = goal.strip()
-        patterns = [
-            r'(?:search\s+for|look\s+for|find|play|watch|listen\s+to)\s+(.+?)(?:\s+(?:and\s+)?(?:actually\s+)?(?:play|watch|open)\b|$)',
-            r'youtube\s+(?:and\s+)?(.+?)(?:\s+(?:and\s+)?(?:actually\s+)?(?:play|watch|open)\b|$)',
-        ]
-        query = ""
-        for pattern in patterns:
-            match = re.search(pattern, text, flags=re.I)
-            if match:
-                query = match.group(1)
-                break
-        if not query:
-            query = self._extract_site_query(text, "youtube.com")
-
-        query = re.sub(
-            r'\b(?:can|cna|cn|u|you|please|plz|go|got|o|to|youtube|and|search|for|look|find|actually|really|please|play|watch|listen|that|this|song|video|music|open)\b',
-            ' ',
-            query,
-            flags=re.I,
-        )
-        query = re.sub(r'\s+', ' ', query).strip(" -:,")
-        return query
+        # Cut a trailing compound directive first ("... and actually play it",
+        # "... and actually play that song"), then run the one cleaner.
+        text = re.sub(
+            r'\s+(?:and\s+)?(?:actually\s+)?(?:play|watch|open|listen)(?:\s+to)?'
+            r'(?:\s+(?:it|this|that|one))?(?:\s+(?:song|video|music|track|clip))?\s*$',
+            ' ', goal or "", flags=re.I)
+        query = self._clean_query(text)
+        # Drop media-noun filler the generic cleaner leaves behind.
+        query = re.sub(r'\b(?:song|video|music|track|that|this)\b', ' ', query, flags=re.I)
+        return re.sub(r'\s+', ' ', query).strip(" -:,")
 
     def _extract_keep_note_text(self, goal: str) -> str:
         text = goal.strip()
@@ -1435,9 +1470,7 @@ class IntentPlanner:
             if not phrase:
                 continue
             query = re.sub(rf'\b{re.escape(phrase)}\b', ' ', query, flags=re.I)
-        query = re.sub(r'\b(?:for|about|please|can you|can u|look up|search|go to)\b', ' ', query, flags=re.I)
-        query = " ".join(query.split())
-        return query.strip(" .,:;")
+        return self._clean_query(query)
 
     def _extract_target_domain(self, goal: str) -> str:
         explicit = re.search(
@@ -1458,32 +1491,23 @@ class IntentPlanner:
         return ""
 
     def _extract_site_query(self, goal: str, domain: str) -> str:
-        query = goal
-        query = re.sub(r'https?://[^\s]+', ' ', query, flags=re.I)
-        query = re.sub(rf'\b(?:www\.)?{re.escape(domain)}\b', ' ', query, flags=re.I)
+        query = self._clean_query(goal)
+        # Drop the site's own root word ("reddit", "youtube", "stackoverflow")
+        # if the user typed it: it is the destination, not the query. The root
+        # is never a product name (apple/samsung/store), so this stays safe on
+        # commerce domains where the product (pixel, galaxy) must survive.
         root = domain.split('.')[0]
-        if root and root not in ("com", "org", "net"):
+        if root and root not in ("com", "org", "net", "www"):
             query = re.sub(rf'\b{re.escape(root)}\b', ' ', query, flags=re.I)
-        # Strip site-name aliases EXCEPT on product/commerce domains, where the
-        # alias word doubles as the product the user wants (e.g. "pixel"). The
-        # domain-root strip above already removes the redundant brand token there.
+        # Drop alternate site aliases ("stack overflow", "twitter") too, except
+        # on product domains where an alias may be the product itself.
         if domain not in ("apple.com", "samsung.com", "store.google.com"):
             for alias, alias_domain in self.SITE_ALIASES.items():
                 if alias_domain == domain:
                     query = re.sub(rf'\b{re.escape(alias)}\b', ' ', query, flags=re.I)
-        # Command scaffolding + purchase/price/question filler, so the query is
-        # the product/topic rather than the user's phrasing.
-        query = re.sub(
-            r'\b(?:can you|can u|please|go|got|o|to|on|over|an|a|and|d|dsearch|'
-            r'look|for|search|find|open|visit|site|website|page|result|results|'
-            r'buy|order|purchase|get|me|my|some|good|new|the|whats|what|'
-            r'how|much|is|cheapest|cost|price|of)\b',
-            ' ',
-            query,
-            flags=re.I,
-        )
-        query = " ".join(query.split())
-        return query.strip(" .,:;")
+        # Re-trim edges: removing the site root can expose trailing filler
+        # ("python decorators on stackoverflow" -> "python decorators on" -> ...).
+        return self._clean_query(query)
 
     def _wants_to_open_result(self, goal: str) -> bool:
         goal_lower = goal.lower()

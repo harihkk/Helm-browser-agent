@@ -59,5 +59,40 @@ class InferredDirectRouting(unittest.TestCase):
         self.assertIn("pixel", url.lower(), url)
 
 
+class QueryIsClean(unittest.TestCase):
+    """The query must never carry a site name, a URL, or leading command words,
+    regardless of how the user phrases it (the systemic bug behind the reddit
+    'reddit.com uber vs lyft' leak)."""
+
+    def setUp(self):
+        self.p = IntentPlanner()
+
+    # (prompt, tokens that MUST appear, tokens that must NOT)
+    CASES = [
+        ("can u open reddit.com and look for uber vs lyft", ["uber", "lyft"], ["reddit", "reddit.com", "look", "for"]),
+        ("buy me an iPhone 16 Pro Max", ["iphone"], ["buy", "me"]),
+        ("order some AA batteries", ["batteries"], ["order", "some"]),
+        ("get me a Pixel 9 Pro", ["pixel"], ["get", "me"]),
+        ("find python decorators on stackoverflow", ["python", "decorators"], ["find", "stackoverflow", "on"]),
+    ]
+
+    def test_query_carries_payload_not_scaffolding(self):
+        for prompt, must, must_not in self.CASES:
+            with self.subTest(prompt=prompt):
+                q = (self.p.parse_intent(prompt).search_query or "").lower()
+                for tok in must:
+                    self.assertIn(tok, q, f"{prompt!r} -> query {q!r} missing {tok!r}")
+                for tok in must_not:
+                    self.assertNotIn(tok, q.split(), f"{prompt!r} -> query {q!r} leaked {tok!r}")
+
+    def test_no_bare_domain_survives_in_query(self):
+        for prompt in ("open reddit.com and look for uber vs lyft",
+                       "search amazon.com for a yoga mat"):
+            with self.subTest(prompt=prompt):
+                q = self.p.parse_intent(prompt).search_query or ""
+                self.assertNotRegex(q.lower(), r"\b[a-z0-9-]+\.(?:com|org|net)\b",
+                                    f"{prompt!r} leaked a domain into {q!r}")
+
+
 if __name__ == "__main__":
     unittest.main()

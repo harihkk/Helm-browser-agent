@@ -10,7 +10,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Dict, Any
 from datetime import datetime
-from fastapi import FastAPI, WebSocket, HTTPException, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, HTTPException, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -613,6 +613,32 @@ async def get_screenshot():
     if not screenshot:
         raise HTTPException(500, "Screenshot failed")
     return {"screenshot": screenshot}
+
+
+@app.post("/api/transcribe")
+async def transcribe(request: Request):
+    """Voice input: transcribe raw recorded audio via Groq Whisper. Works in any
+    browser since the audio comes to us, not the browser's speech service."""
+    if not ai_agent or not getattr(ai_agent, "client", None):
+        raise HTTPException(503, "Voice transcription needs Groq configured (GROQ_API_KEY).")
+    data = await request.body()
+    if not data:
+        raise HTTPException(400, "No audio received.")
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(413, "Audio too large (max 25MB).")
+    ctype = (request.headers.get("content-type") or "").lower()
+    ext = "webm"
+    for needle, e in (("ogg", "ogg"), ("mp4", "mp4"), ("m4a", "mp4"),
+                      ("wav", "wav"), ("mpeg", "mp3"), ("mp3", "mp3")):
+        if needle in ctype:
+            ext = e
+            break
+    try:
+        text = await ai_agent.transcribe_audio(data, f"voice.{ext}")
+    except Exception as e:
+        logger.error(f"Transcription failed: {e}")
+        raise HTTPException(502, "Transcription failed. Check the Groq key and try again.")
+    return {"text": text}
 
 
 @app.post("/api/human-input")

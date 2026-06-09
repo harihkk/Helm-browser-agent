@@ -1306,64 +1306,65 @@ async function extractData(){
   }catch(e){toast('Extraction failed','err')}
 }
 
-/* ============== voice (honest) ============== */
+/* ============== voice (record -> server Whisper) ============== */
+/* The browser Web Speech API does not work in Brave (Google's speech key is
+   stripped), so we record audio locally and transcribe it server-side. */
+let mediaRecorder=null, audioChunks=[], audioStream=null;
 function voiceSupported(){
-  return ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window);
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
 }
 function initVoice(){
   const btn=$('voiceBtn');
-  btn.hidden=false;
-  btn.title=voiceSupported()?'Voice input':'Voice input not supported in this browser';
+  if(!btn) return;
+  btn.hidden=!voiceSupported();
+  btn.title=voiceSupported()?'Voice input':'Voice input needs a mic and a modern browser';
+}
+function stopVoiceUI(){
+  const btn=$('voiceBtn');
+  if(btn){btn.classList.remove('on');btn.title='Voice input';}
+  voiceOn=false;
 }
 async function toggleVoice(){
   const btn=$('voiceBtn');
-  if(!voiceSupported()){
-    toast('Voice input not supported in this browser','err');
-    return;
-  }
+  if(!voiceSupported()){toast('Voice input not supported in this browser','err');return;}
   if(voiceOn){
-    try{recognition && recognition.stop()}catch(_){}
-    btn.classList.remove('on');btn.title='Voice input';voiceOn=false;
+    try{mediaRecorder && mediaRecorder.state!=='inactive' && mediaRecorder.stop();}catch(_){}
+    return; // onstop finishes up (transcribe + reset)
+  }
+  try{
+    audioStream=await navigator.mediaDevices.getUserMedia({audio:true});
+  }catch(e){
+    toast((e&&e.name==='NotAllowedError')?'Microphone permission denied':'Could not access microphone','err');
     return;
   }
-  const S=window.SpeechRecognition || window.webkitSpeechRecognition;
-  let finalText='', heardVoice=false;
-  recognition=new S();
-  recognition.continuous=false;
-  recognition.interimResults=true;
-  recognition.lang='en-US';
-  recognition.onresult=e=>{
-    let interim='';
-    for(let i=e.resultIndex;i<e.results.length;i++){
-      const txt=e.results[i][0].transcript;
-      if(e.results[i].isFinal)finalText+=txt;
-      else interim+=txt;
-    }
-    const text=(finalText||interim).trim();
-    if(text){
-      heardVoice=true;
-      $('taskInput').value=text;
-      $('taskInput').dispatchEvent(new Event('input'));
-    }
-  };
-  recognition.onerror=e=>{
-    const err=e.error||'unknown';
-    const msg=err==='not-allowed'?'Microphone permission denied':'Voice input failed: '+err;
-    toast(msg,'err');
-    btn.classList.remove('on');btn.title='Voice input';voiceOn=false;
-  };
-  recognition.onend=()=>{
-    if(heardVoice)toast('Voice captured','ok');
-    btn.classList.remove('on');btn.title='Voice input';voiceOn=false;
+  audioChunks=[];
+  try{ mediaRecorder=new MediaRecorder(audioStream); }
+  catch(e){ toast('Recording not supported here','err'); try{audioStream.getTracks().forEach(t=>t.stop())}catch(_){}; return; }
+  mediaRecorder.ondataavailable=e=>{ if(e.data&&e.data.size>0) audioChunks.push(e.data); };
+  mediaRecorder.onstop=async()=>{
+    stopVoiceUI();
+    try{audioStream.getTracks().forEach(t=>t.stop())}catch(_){}
+    if(!audioChunks.length){toast('No audio captured','err');return;}
+    const blob=new Blob(audioChunks,{type:(mediaRecorder.mimeType||'audio/webm')});
+    if(btn)btn.title='Transcribing…';
+    try{
+      const r=await fetch('/api/transcribe',{method:'POST',headers:{'Content-Type':blob.type||'audio/webm'},body:blob});
+      if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.detail||('HTTP '+r.status));}
+      const j=await r.json();
+      const text=(j.text||'').trim();
+      if(text){
+        const inp=$('taskInput');inp.value=text;inp.dispatchEvent(new Event('input'));inp.focus();
+        toast('Voice captured','ok');
+      }else{toast('Did not catch that, try again','err');}
+    }catch(e){toast('Transcription failed: '+(e.message||e),'err');}
+    if(btn)btn.title='Voice input';
   };
   try{
-    recognition.start();
-    voiceOn=true;
-    btn.classList.add('on');
-    btn.title='Listening, click to stop';
+    mediaRecorder.start();
+    voiceOn=true;btn.classList.add('on');btn.title='Recording, click to stop';
   }catch(e){
-    toast('Could not start voice: '+(e.message||e),'err');
-    btn.classList.remove('on');btn.title='Voice input';
+    toast('Could not start recording: '+(e.message||e),'err');stopVoiceUI();
+    try{audioStream.getTracks().forEach(t=>t.stop())}catch(_){}
   }
 }
 

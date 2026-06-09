@@ -5,6 +5,7 @@ AI Agent - Groq-powered with robust JSON parsing and anti-loop logic.
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from typing import Dict, List, Any, Optional
@@ -879,6 +880,31 @@ JSON: {{"action": "...", "parameters": {{}}, "reasoning": "..."}}"""
         )
         text = re.sub(r'\s+', ' ', text).strip(" .,:;")
         return text or (goal or '')[:80]
+
+    async def transcribe_audio(self, audio_bytes: bytes, filename: str = "voice.webm") -> str:
+        """Transcribe recorded audio with Groq Whisper.
+
+        The browser's Web Speech API does not work in privacy browsers (Brave
+        strips Google's speech key), so voice input records audio locally and
+        sends it here. This runs on the already-configured Groq key.
+        """
+        if not self.client:
+            raise RuntimeError("Voice transcription needs GROQ_API_KEY configured.")
+        model = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
+
+        def sync_call():
+            resp = self.client.audio.transcriptions.create(
+                file=(filename, audio_bytes),
+                model=model,
+                response_format="text",
+                # Bound the blocking HTTP call so it cannot pin a worker.
+                timeout=30.0,
+            )
+            # response_format="text" yields a plain string; objects expose .text
+            return resp if isinstance(resp, str) else getattr(resp, "text", str(resp))
+
+        text = await asyncio.get_running_loop().run_in_executor(None, sync_call)
+        return (text or "").strip()
 
     def get_token_stats(self) -> Dict:
         return self.token_tracker.get_session_stats()
